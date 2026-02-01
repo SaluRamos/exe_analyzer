@@ -15,16 +15,16 @@ def get_imphash(file_path):
     pe = pefile.PE(file_path)
     return pe.get_imphash()
 
-def calculate_entropy(data):
-    if not data:
-        return 0.0
-    counter = Counter(data)
-    file_len = len(data)
-    entropy = 0.0
-    for count in counter.values():
-        p_x = count / file_len
-        entropy += - p_x * math.log2(p_x)
-    return entropy
+def calculate_entropy(data) -> float:
+	entropy = 0  
+	if not data:
+		return 0
+	ent = 0
+	for x in range(256):
+		p_x = float(data.count(x))/len(data)
+		if p_x > 0:
+			entropy += - p_x*math.log(p_x, 2)
+	return entropy
 
 def print_iat(file_path):
     print(f"-------------------{os.path.basename(file_path)}-------------------")
@@ -35,7 +35,7 @@ def print_iat(file_path):
             for imp in entry.imports:
                 address = hex(imp.address)
                 name = imp.name.decode() if imp.name else "Ordinal"
-                print(f"  {address}: {name}")
+                print(f"\r{address}: {name}")
     print(f"---------------------------------------------------------")
 
 def get_windows_theme() -> bool:
@@ -105,16 +105,25 @@ class ExeAnalyzer(QWidget):
         with open(file_path, "rb") as f:
             data = f.read()
         md5 = hashlib.md5(data).hexdigest()
-        entropy = calculate_entropy(data)
+
+        pe = pefile.PE(file_path)
+        for s in pe.sections:
+            entropy = calculate_entropy(s.get_data())
+            section_name = s.Name.decode('utf-8', errors='ignore').split('\x00')[0]
+            print(f"{section_name:<15} {entropy:>10.4f}")
+        with open(file_path, 'rb') as f:
+            full_entropy = calculate_entropy(f.read())
+
+        print(f"{'FILE ENTROPY':<15} {full_entropy:>10.4f}")
+
         try:
-            pe = pefile.PE(file_path)
             imphash = pe.get_imphash()
         except Exception:
             imphash = "N/A (Erro ao ler PE)"
+
         result = (f"File: {os.path.basename(file_path)}\n" +
                     f"MD5: {md5}\n" +
-                    f"ImpHash: {imphash}\n" +
-                    f"Entropy: {entropy:.4f}\n"
+                    f"ImpHash: {imphash}\n"
         )
         self.label.setText(result)
         print(result)
