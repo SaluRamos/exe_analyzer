@@ -1,0 +1,4 @@
+pefile
+PyQt6
+pywin32
+pyinstaller
