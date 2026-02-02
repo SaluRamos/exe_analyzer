@@ -1,1 +1,2 @@
-pyinstaller --onefile --noconsole main.py
+pyinstaller --noconfirm --onefile --noconsole --icon="icon.ico" main.py
+pause
