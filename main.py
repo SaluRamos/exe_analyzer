@@ -145,6 +145,12 @@ class ExeAnalyzer(QWidget):
         self.setLayout(layout)
         layout.addWidget(self.scroll)
 
+        self.info_str = ""
+        self.entropy_str = ""
+        self.iat_str = ""
+        self.strings_str = ""
+        self.file_path = None
+
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.accept()
@@ -187,46 +193,58 @@ class ExeAnalyzer(QWidget):
                         continue
         return results
 
-    def analyze(self, file_path:str):
+    def analyze(self, file_path:str) -> None:
+        self.file_path = file_path
+        self.info_str = ""
+        self.entropy_str = ""
+        self.iat_str = ""
+        self.strings_str = ""
         self.label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        out = ""
         imphash = None
         md5 = None
-        with pefile.PE(file_path) as pe:
+        with pefile.PE(self.file_path) as pe:
             imphash = pe.get_imphash()
             md5 = hashlib.md5(pe.__data__).hexdigest()
 
-
-            out += get_section_entry_str("INFO")
-            creation_timestamp = read_pe_timestamp(file_path)
+            self.info_str += get_section_entry_str("INFO")
+            creation_timestamp = read_pe_timestamp(self.file_path)
             creation_date = datetime.fromtimestamp(creation_timestamp).strftime('%d/%m/%Y %H:%M:%S')
-            out += f"File: {os.path.basename(file_path)}\n"
-            out += f"Creation TimeStamp: {creation_timestamp} ({creation_date})\n"
-            out += f"MD5: {md5}\n"
-            out += f"ImpHash: {imphash}\n"
-            out += get_section_end_str()
+            self.info_str += f"File: {os.path.basename(self.file_path)}\n"
+            self.info_str += f"Creation TimeStamp: {creation_timestamp} ({creation_date})\n"
+            self.info_str += f"MD5: {md5}\n"
+            self.info_str += f"ImpHash: {imphash}\n"
+            self.info_str += get_section_end_str()
             
+            self.entropy_str += get_section_entry_str("ENTROPY")
+            self.entropy_str += get_entropys(pe)
+            self.entropy_str += get_section_end_str()
 
-            out += get_section_entry_str("ENTROPY")
-            out += get_entropys(pe)
-            out += get_section_end_str()
+            self.update_iat(pe)
+            
+            self.update_strings(pe)
+            
+        self.update_label()
 
+    def update_iat(self, pe:pefile.PE, search:str=None) -> None:
+        self.iat_str += get_section_entry_str("IAT")
+        self.iat_str += get_iat(pe)
+        self.iat_str += get_section_end_str()
 
-            out += get_section_entry_str("IAT")
-            out += get_iat(pe)
-            out += get_section_end_str()
+    def update_strings(self, pe:pefile.PE, search:str=None) -> None:
+        self.strings_str += get_section_entry_str("STRINGS")
+        strings = self.extract_strings(self.file_path)
+        self.strings_str += f"TOTAL STRINGS = {len(strings)}\n"
+        for elem in strings:
+            self.strings_str += str(elem['f']) + " = '" + elem['s'] + "'\n"
+        self.strings_str += get_section_end_str()
 
-
-            out += get_section_entry_str("STRINGS")
-            strings = self.extract_strings(file_path)
-            out += f"TOTAL STRINGS = {len(strings)}\n"
-            for elem in strings:
-                out += str(elem['f']) + " = '" + elem['s'] + "'\n"
-            out += get_section_end_str()
-
-
-        self.label.setText(out)
-        print(out)
+    def update_label(self) -> None:
+        result = ""
+        result += self.info_str
+        result += self.entropy_str
+        result += self.iat_str
+        result += self.strings_str
+        self.label.setText(result)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
