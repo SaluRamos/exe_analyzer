@@ -1,7 +1,7 @@
 #libs
 import winreg
 import win32com.client
-from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QScrollArea
 from PyQt6.QtCore import Qt
 #native libs
 from collections import Counter
@@ -10,33 +10,60 @@ import os
 import pefile
 import math
 import hashlib
+import struct
+from datetime import datetime
 
 def get_imphash(file_path):
     pe = pefile.PE(file_path)
     return pe.get_imphash()
 
 def calculate_entropy(data) -> float:
-	entropy = 0  
-	if not data:
-		return 0
-	ent = 0
-	for x in range(256):
-		p_x = float(data.count(x))/len(data)
-		if p_x > 0:
-			entropy += - p_x*math.log(p_x, 2)
-	return entropy
+    if not data:
+        return 0.0
+    entropy = 0
+    length = len(data)
+    counts = Counter(data)
+    for count in counts.values():
+        p_x = count / length
+        entropy -= p_x * math.log(p_x, 2)
+    return entropy
 
-def print_iat(file_path):
-    print(f"-------------------{os.path.basename(file_path)}-------------------")
+SECTION_TOTAL_SIZE = 50
+
+def get_section_entry_str(name:str) -> str:
+    each_side_amount = int((SECTION_TOTAL_SIZE - len(name))/2)
+    increment = ""
+    if (each_side_amount*2) + len(name) < SECTION_TOTAL_SIZE:
+        increment = "-"
+    each_side = "-"*each_side_amount
+    out = each_side + increment + name + each_side + "\n"
+    return out
+
+def get_section_end_str() -> str:
+    out = "-"*SECTION_TOTAL_SIZE + "\n"
+    return out
+
+def get_iat(file_path) -> str:
+    out = ""
     pe = pefile.PE(file_path)
+    total = 0
     if hasattr(pe, 'DIRECTORY_ENTRY_IMPORT'):
         for entry in pe.DIRECTORY_ENTRY_IMPORT:
-            print(f"DLL: {entry.dll.decode()}")
+            out += f"DLL: {entry.dll.decode()}\n"
             for imp in entry.imports:
                 address = hex(imp.address)
                 name = imp.name.decode() if imp.name else "Ordinal"
-                print(f"\r{address}: {name}")
-    print(f"---------------------------------------------------------")
+                out += f"\t{address}: {name}\n"
+                total += 1
+    out += f"TOTAL ENTRIES: {total}\n"
+    return out
+
+def read_pe_timestamp(file_path):
+    with open(file_path, 'rb') as f:
+        f.seek(60)
+        pe_offset = struct.unpack('<I', f.read(4))[0]
+        f.seek(pe_offset + 8)
+        return struct.unpack('<I', f.read(4))[0]
 
 def get_windows_theme() -> bool:
     """Retorna True se for Dark Mode, False se for Light Mode"""
@@ -57,29 +84,37 @@ def get_shortcut_target(shortcut_path):
         return None
 
 class ExeAnalyzer(QWidget):
+
     def __init__(self):
         super().__init__()
         self.initUI()
         
     def initUI(self):
         self.setWindowTitle('Exe analyzer')
-        self.resize(400, 200)
+        self.resize(440, 700)
         self.setAcceptDrops(True)
-        is_dark = get_windows_theme()
+        label_color = "white" if get_windows_theme() else "black"
         layout = QVBoxLayout()
+
+        self.scroll = QScrollArea(self)
+        self.scroll.setWidgetResizable(True)
+
         self.label = QLabel('Arraste o arquivo .exe aqui', self)
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        text_color = "white" if is_dark else "black"
         self.label.setStyleSheet(f"""
-            border: 2px dashed #aaa;
-            border-radius: 10px;
-            font-size: 16px;
-            color: {text_color};
+            border: 2px dashed #aaa; 
+            border-radius: 10px; 
+            font-size: 13px; 
+            font-family: 'Consolas', 'Courier New', monospace;
+            color: {label_color};
+            padding: 10px;
         """)
         self.label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.label.setWordWrap(True)
-        layout.addWidget(self.label)
+        self.scroll.setWidget(self.label)
+
         self.setLayout(layout)
+        layout.addWidget(self.scroll)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -100,33 +135,41 @@ class ExeAnalyzer(QWidget):
                 self.label.setText("Erro: Arraste apenas arquivos .exe")
 
     def analyze(self, file_path:str):
-        print_iat(file_path)
-
-        with open(file_path, "rb") as f:
-            data = f.read()
-        md5 = hashlib.md5(data).hexdigest()
-
+        self.label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        out = ""
         pe = pefile.PE(file_path)
+        file_data = pe.__data__
+
+
+        out += get_section_entry_str("INFO")
+        creation_timestamp = read_pe_timestamp(file_path)
+        creation_date = datetime.fromtimestamp(creation_timestamp).strftime('%d/%m/%Y %H:%M:%S')
+        md5 = hashlib.md5(file_data).hexdigest()
+        imphash = pe.get_imphash()
+        out += f"File: {os.path.basename(file_path)}\n"
+        out += f"Creation TimeStamp: {creation_timestamp} ({creation_date})\n"
+        out += f"MD5: {md5}\n"
+        out += f"ImpHash: {imphash}\n"
+        out += get_section_end_str()
+        
+
+        out += get_section_entry_str("ENTROPY")
         for s in pe.sections:
             entropy = calculate_entropy(s.get_data())
             section_name = s.Name.decode('utf-8', errors='ignore').split('\x00')[0]
-            print(f"{section_name:<15} {entropy:>10.4f}")
-        with open(file_path, 'rb') as f:
-            full_entropy = calculate_entropy(f.read())
+            out += f"{section_name:<20} {entropy:>10.4f}\n"
+        full_entropy = calculate_entropy(file_data)
+        out += f"{'FILE ENTROPY':<20} {full_entropy:>10.4f}\n"
+        out += get_section_end_str()
 
-        print(f"{'FILE ENTROPY':<15} {full_entropy:>10.4f}")
 
-        try:
-            imphash = pe.get_imphash()
-        except Exception:
-            imphash = "N/A (Erro ao ler PE)"
+        out += get_section_entry_str("IAT")
+        out += get_iat(file_path)
+        out += get_section_end_str()
 
-        result = (f"File: {os.path.basename(file_path)}\n" +
-                    f"MD5: {md5}\n" +
-                    f"ImpHash: {imphash}\n"
-        )
-        self.label.setText(result)
-        print(result)
+
+        self.label.setText(out)
+        print(out)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
