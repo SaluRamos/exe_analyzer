@@ -1,7 +1,7 @@
 #libs
 import winreg
 import win32com.client
-from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QScrollArea
+from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QScrollArea, QLineEdit
 from PyQt6.QtCore import Qt
 #native libs
 from collections import Counter
@@ -44,8 +44,10 @@ def get_section_entry_str(name:str) -> str:
     out = each_side + increment + name + each_side + "\n"
     return out
 
-def get_section_end_str() -> str:
-    out = "-"*SECTION_TOTAL_SIZE + "\n"
+def get_section_end_str(newline:bool=True) -> str:
+    out = "-"*SECTION_TOTAL_SIZE
+    if newline:
+        out += "\n"
     return out
 
 #--------------------------------------------INFO--------------------------------------------
@@ -123,26 +125,40 @@ class ExeAnalyzer(QWidget):
         self.resize(440, 700)
         self.setAcceptDrops(True)
         label_color = "white" if get_windows_theme() else "black"
-        layout = QVBoxLayout()
-
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0) # Remove margens externas
+        
         self.scroll = QScrollArea(self)
         self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        
+        self.container = QWidget()
+        self.container_layout = QVBoxLayout(self.container)
+        self.container_layout.setContentsMargins(5, 5, 5, 5) # Pequeno respiro nas bordas
+        self.container_layout.setSpacing(0) # Cola os widgets verticalmente
+        self.container_layout.setAlignment(Qt.AlignmentFlag.AlignTop) # Empilha tudo no topo
 
-        self.label = QLabel('Arraste o arquivo .exe aqui', self)
-        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label.setStyleSheet(f"""
-            border: 2px dashed #aaa; 
-            border-radius: 10px; 
-            font-size: 13px; 
-            font-family: 'Consolas', 'Courier New', monospace;
-            color: {label_color};
-            padding: 10px;
-        """)
-        self.label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.label.setWordWrap(True)
-        self.scroll.setWidget(self.label)
+        self.label_top = QLabel('Arraste o arquivo .exe aqui', self)
+        self.label_top.setStyleSheet(f"font-family: 'Consolas'; color: {label_color};")
+        self.label_top.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.label_top.setWordWrap(False)
 
-        self.setLayout(layout)
+        self.search_bar = QLineEdit()
+        self.search_bar.setPlaceholderText("Search IAT or Strings...")
+        self.search_bar.textChanged.connect(self.on_search_changed)
+        self.search_bar.setVisible(False)
+
+        self.label_bottom = QLabel('', self)
+        self.label_bottom.setStyleSheet(f"font-family: 'Consolas'; color: {label_color};")
+        self.label_bottom.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.label_bottom.setWordWrap(False)
+
+        self.container_layout.addWidget(self.label_top)
+        self.container_layout.addWidget(self.search_bar)
+        self.container_layout.addWidget(self.label_bottom)
+        
+        self.scroll.setWidget(self.container)
         layout.addWidget(self.scroll)
 
         self.info_str = ""
@@ -168,6 +184,13 @@ class ExeAnalyzer(QWidget):
                 self.analyze(file_path)
             else:
                 self.label.setText("Erro: Arraste apenas arquivos .exe")
+
+    def on_search_changed(self):
+        if self.file_path:
+            with pefile.PE(self.file_path) as pe:
+                self.update_iat(pe, self.search_bar.text())
+                self.update_strings(pe, self.search_bar.text())
+            self.update_label()
 
     def extract_strings(self, file_path:str, min_len:int=4) -> None:
         results = []
@@ -199,14 +222,12 @@ class ExeAnalyzer(QWidget):
         self.entropy_str = ""
         self.iat_str = ""
         self.strings_str = ""
-        self.label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        imphash = None
-        md5 = None
+        self.label_top.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.search_bar.setVisible(True)
         with pefile.PE(self.file_path) as pe:
             imphash = pe.get_imphash()
             md5 = hashlib.md5(pe.__data__).hexdigest()
-
-            self.info_str += get_section_entry_str("INFO")
+            self.info_str = get_section_entry_str("INFO")
             creation_timestamp = read_pe_timestamp(self.file_path)
             creation_date = datetime.fromtimestamp(creation_timestamp).strftime('%d/%m/%Y %H:%M:%S')
             self.info_str += f"File: {os.path.basename(self.file_path)}\n"
@@ -214,37 +235,46 @@ class ExeAnalyzer(QWidget):
             self.info_str += f"MD5: {md5}\n"
             self.info_str += f"ImpHash: {imphash}\n"
             self.info_str += get_section_end_str()
-            
-            self.entropy_str += get_section_entry_str("ENTROPY")
-            self.entropy_str += get_entropys(pe)
-            self.entropy_str += get_section_end_str()
 
-            self.update_iat(pe)
-            
-            self.update_strings(pe)
-            
+            self.entropy_str = get_section_entry_str("ENTROPY")
+            self.entropy_str += get_entropys(pe)
+            self.entropy_str += get_section_end_str(False)
+
+            self.update_iat(pe, self.search_bar.text())
+            self.update_strings(pe, self.search_bar.text())
         self.update_label()
 
-    def update_iat(self, pe:pefile.PE, search:str=None) -> None:
-        self.iat_str += get_section_entry_str("IAT")
-        self.iat_str += get_iat(pe)
+    def update_iat(self, pe:pefile.PE, search:str="") -> None:
+        self.iat_str = get_section_entry_str("IAT")
+        total = 0
+        search = search.lower()
+        if hasattr(pe, 'DIRECTORY_ENTRY_IMPORT'):
+            for entry in pe.DIRECTORY_ENTRY_IMPORT:
+                dll_name = entry.dll.decode()
+                temp_dll_str = ""
+                for imp in entry.imports:
+                    imp_name = imp.name.decode() if imp.name else "Ordinal"
+                    if not search or search in dll_name.lower() or search in imp_name.lower():
+                        temp_dll_str += f"\t{hex(imp.address)}: {imp_name}\n"
+                        total += 1
+                if temp_dll_str:
+                    self.iat_str += f"DLL: {dll_name}\n" + temp_dll_str
+        self.iat_str += f"TOTAL ENTRIES: {total}\n"
         self.iat_str += get_section_end_str()
 
-    def update_strings(self, pe:pefile.PE, search:str=None) -> None:
-        self.strings_str += get_section_entry_str("STRINGS")
-        strings = self.extract_strings(self.file_path)
-        self.strings_str += f"TOTAL STRINGS = {len(strings)}\n"
-        for elem in strings:
-            self.strings_str += str(elem['f']) + " = '" + elem['s'] + "'\n"
-        self.strings_str += get_section_end_str()
+    def update_strings(self, pe:pefile.PE, search:str="") -> None:
+        self.strings_str = get_section_entry_str("STRINGS")
+        all_strings = self.extract_strings(self.file_path)
+        search = search.lower()
+        filtered = [s for s in all_strings if not search or search in s['s'].lower() or search in s['f'].lower()]
+        self.strings_str += f"TOTAL STRINGS = {len(filtered)}\n"
+        for elem in filtered:
+            self.strings_str += f"{elem['f']} = '{elem['s']}'\n"
+        self.strings_str += get_section_end_str(False)
 
     def update_label(self) -> None:
-        result = ""
-        result += self.info_str
-        result += self.entropy_str
-        result += self.iat_str
-        result += self.strings_str
-        self.label.setText(result)
+        self.label_top.setText(self.info_str + self.entropy_str)
+        self.label_bottom.setText(self.iat_str + self.strings_str)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
