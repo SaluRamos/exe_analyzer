@@ -12,6 +12,43 @@ import math
 import hashlib
 import struct
 from datetime import datetime
+import re
+
+#--------------------------------------------STRINGS--------------------------------------------
+
+PRINTABLE_RE = re.compile(rb"[ -~]{6,}")
+UTF16_RE = re.compile(rb"(?:[A-Za-z0-9 ./\\:_\-]\x00){4,}")
+
+def is_valid_string(s: str) -> bool:
+    # precisa ter pelo menos uma letra
+    if not re.search(r"[A-Za-z]", s):
+        return False
+    # evitar lixo tipo AAAAABBBBB
+    if len(set(s)) < len(s) * 0.4:
+        return False
+    # evitar excesso de símbolos
+    if re.search(r"[^\w\s./:\\\-]{4,}", s):
+        return False
+    return True
+
+#--------------------------------------------PRINT--------------------------------------------
+
+SECTION_TOTAL_SIZE = 50
+
+def get_section_entry_str(name:str) -> str:
+    each_side_amount = int((SECTION_TOTAL_SIZE - len(name))/2)
+    increment = ""
+    if (each_side_amount*2) + len(name) < SECTION_TOTAL_SIZE:
+        increment = "-"
+    each_side = "-"*each_side_amount
+    out = each_side + increment + name + each_side + "\n"
+    return out
+
+def get_section_end_str() -> str:
+    out = "-"*SECTION_TOTAL_SIZE + "\n"
+    return out
+
+#--------------------------------------------INFO--------------------------------------------
 
 def _calculate_entropy(data) -> float:
     if not data:
@@ -34,21 +71,6 @@ def get_entropys(pe:pefile.PE) -> str:
     out += f"{'FILE ENTROPY':<20} {full_entropy:>10.4f}\n"
     return out
 
-SECTION_TOTAL_SIZE = 50
-
-def get_section_entry_str(name:str) -> str:
-    each_side_amount = int((SECTION_TOTAL_SIZE - len(name))/2)
-    increment = ""
-    if (each_side_amount*2) + len(name) < SECTION_TOTAL_SIZE:
-        increment = "-"
-    each_side = "-"*each_side_amount
-    out = each_side + increment + name + each_side + "\n"
-    return out
-
-def get_section_end_str() -> str:
-    out = "-"*SECTION_TOTAL_SIZE + "\n"
-    return out
-
 def get_iat(pe:pefile.PE) -> str:
     out = ""
     total = 0
@@ -69,6 +91,8 @@ def read_pe_timestamp(file_path):
         pe_offset = struct.unpack('<I', f.read(4))[0]
         f.seek(pe_offset + 8)
         return struct.unpack('<I', f.read(4))[0]
+
+#--------------------------------------------INTERFACE--------------------------------------------
 
 def get_windows_theme() -> bool:
     """Retorna True se for Dark Mode, False se for Light Mode"""
@@ -139,6 +163,30 @@ class ExeAnalyzer(QWidget):
             else:
                 self.label.setText("Erro: Arraste apenas arquivos .exe")
 
+    def extract_strings(self, file_path:str, min_len:int=4) -> None:
+        results = []
+        with pefile.PE(file_path) as pe:
+            for section in pe.sections:
+                section_name = section.Name.strip(b'\x00')
+                data = section.get_data()
+                # ASCII
+                for m in PRINTABLE_RE.finditer(data):
+                    try:
+                        s = m.group().decode("ascii")
+                        if len(s) >= min_len and is_valid_string(s):
+                            results.append({"f":section_name.decode("utf-8"), "s":s})
+                    except UnicodeDecodeError:
+                        continue
+                # UTF-16LE
+                for m in UTF16_RE.finditer(data):
+                    try:
+                        s = m.group().decode("utf-16le")
+                        if len(s) >= min_len and is_valid_string(s):
+                            results.append({"f":section_name.decode("utf-8"), "s":s})
+                    except UnicodeDecodeError:
+                        continue
+        return results
+
     def analyze(self, file_path:str):
         self.label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         out = ""
@@ -166,6 +214,14 @@ class ExeAnalyzer(QWidget):
 
             out += get_section_entry_str("IAT")
             out += get_iat(pe)
+            out += get_section_end_str()
+
+
+            out += get_section_entry_str("STRINGS")
+            strings = self.extract_strings(file_path)
+            out += f"TOTAL STRINGS = {len(strings)}\n"
+            for elem in strings:
+                out += str(elem['f']) + " = '" + elem['s'] + "'\n"
             out += get_section_end_str()
 
 
