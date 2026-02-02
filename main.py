@@ -13,11 +13,7 @@ import hashlib
 import struct
 from datetime import datetime
 
-def get_imphash(file_path):
-    pe = pefile.PE(file_path)
-    return pe.get_imphash()
-
-def calculate_entropy(data) -> float:
+def _calculate_entropy(data) -> float:
     if not data:
         return 0.0
     entropy = 0
@@ -27,6 +23,16 @@ def calculate_entropy(data) -> float:
         p_x = count / length
         entropy -= p_x * math.log(p_x, 2)
     return entropy
+
+def get_entropys(pe:pefile.PE) -> str:
+    out = ""
+    for s in pe.sections:
+        entropy = _calculate_entropy(s.get_data())
+        section_name = s.Name.decode('utf-8', errors='ignore').split('\x00')[0]
+        out += f"{section_name:<20} {entropy:>10.4f}\n"
+    full_entropy = _calculate_entropy(pe.__data__)
+    out += f"{'FILE ENTROPY':<20} {full_entropy:>10.4f}\n"
+    return out
 
 SECTION_TOTAL_SIZE = 50
 
@@ -43,9 +49,8 @@ def get_section_end_str() -> str:
     out = "-"*SECTION_TOTAL_SIZE + "\n"
     return out
 
-def get_iat(file_path) -> str:
+def get_iat(pe:pefile.PE) -> str:
     out = ""
-    pe = pefile.PE(file_path)
     total = 0
     if hasattr(pe, 'DIRECTORY_ENTRY_IMPORT'):
         for entry in pe.DIRECTORY_ENTRY_IMPORT:
@@ -137,35 +142,31 @@ class ExeAnalyzer(QWidget):
     def analyze(self, file_path:str):
         self.label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         out = ""
-        pe = pefile.PE(file_path)
-        file_data = pe.__data__
+        imphash = None
+        md5 = None
+        with pefile.PE(file_path) as pe:
+            imphash = pe.get_imphash()
+            md5 = hashlib.md5(pe.__data__).hexdigest()
 
 
-        out += get_section_entry_str("INFO")
-        creation_timestamp = read_pe_timestamp(file_path)
-        creation_date = datetime.fromtimestamp(creation_timestamp).strftime('%d/%m/%Y %H:%M:%S')
-        md5 = hashlib.md5(file_data).hexdigest()
-        imphash = pe.get_imphash()
-        out += f"File: {os.path.basename(file_path)}\n"
-        out += f"Creation TimeStamp: {creation_timestamp} ({creation_date})\n"
-        out += f"MD5: {md5}\n"
-        out += f"ImpHash: {imphash}\n"
-        out += get_section_end_str()
-        
+            out += get_section_entry_str("INFO")
+            creation_timestamp = read_pe_timestamp(file_path)
+            creation_date = datetime.fromtimestamp(creation_timestamp).strftime('%d/%m/%Y %H:%M:%S')
+            out += f"File: {os.path.basename(file_path)}\n"
+            out += f"Creation TimeStamp: {creation_timestamp} ({creation_date})\n"
+            out += f"MD5: {md5}\n"
+            out += f"ImpHash: {imphash}\n"
+            out += get_section_end_str()
+            
 
-        out += get_section_entry_str("ENTROPY")
-        for s in pe.sections:
-            entropy = calculate_entropy(s.get_data())
-            section_name = s.Name.decode('utf-8', errors='ignore').split('\x00')[0]
-            out += f"{section_name:<20} {entropy:>10.4f}\n"
-        full_entropy = calculate_entropy(file_data)
-        out += f"{'FILE ENTROPY':<20} {full_entropy:>10.4f}\n"
-        out += get_section_end_str()
+            out += get_section_entry_str("ENTROPY")
+            out += get_entropys(pe)
+            out += get_section_end_str()
 
 
-        out += get_section_entry_str("IAT")
-        out += get_iat(file_path)
-        out += get_section_end_str()
+            out += get_section_entry_str("IAT")
+            out += get_iat(pe)
+            out += get_section_end_str()
 
 
         self.label.setText(out)
