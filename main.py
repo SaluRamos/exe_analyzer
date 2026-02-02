@@ -73,20 +73,6 @@ def get_entropys(pe:pefile.PE) -> str:
     out += f"{'FILE ENTROPY':<20} {full_entropy:>10.4f}\n"
     return out
 
-def get_iat(pe:pefile.PE) -> str:
-    out = ""
-    total = 0
-    if hasattr(pe, 'DIRECTORY_ENTRY_IMPORT'):
-        for entry in pe.DIRECTORY_ENTRY_IMPORT:
-            out += f"DLL: {entry.dll.decode()}\n"
-            for imp in entry.imports:
-                address = hex(imp.address)
-                name = imp.name.decode() if imp.name else "Ordinal"
-                out += f"\t{address}: {name}\n"
-                total += 1
-    out += f"TOTAL ENTRIES: {total}\n"
-    return out
-
 def read_pe_timestamp(file_path):
     with open(file_path, 'rb') as f:
         f.seek(60)
@@ -166,6 +152,8 @@ class ExeAnalyzer(QWidget):
         self.iat_str = ""
         self.strings_str = ""
         self.file_path = None
+        self.all_strings = []
+        self.all_iats = []
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -185,35 +173,44 @@ class ExeAnalyzer(QWidget):
             else:
                 self.label.setText("Erro: Arraste apenas arquivos .exe")
 
+    def extract_iat(self, pe:pefile.PE) -> str:
+        results = []
+        if hasattr(pe, 'DIRECTORY_ENTRY_IMPORT'):
+            for entry in pe.DIRECTORY_ENTRY_IMPORT:
+                for imp in entry.imports:
+                    address = hex(imp.address)
+                    name = imp.name.decode() if imp.name else "Ordinal"
+                    results.append({"l":entry.dll.decode(), "a":address, "n":name})
+        return results
+
     def on_search_changed(self):
         if self.file_path:
             with pefile.PE(self.file_path) as pe:
-                self.update_iat(pe, self.search_bar.text())
-                self.update_strings(pe, self.search_bar.text())
+                self.update_iat(self.search_bar.text())
+                self.update_strings(self.search_bar.text())
             self.update_label()
 
-    def extract_strings(self, file_path:str, min_len:int=4) -> None:
+    def extract_strings(self, pe:pefile.PE, min_len:int=4) -> None:
         results = []
-        with pefile.PE(file_path) as pe:
-            for section in pe.sections:
-                section_name = section.Name.strip(b'\x00')
-                data = section.get_data()
-                # ASCII
-                for m in PRINTABLE_RE.finditer(data):
-                    try:
-                        s = m.group().decode("ascii")
-                        if len(s) >= min_len and is_valid_string(s):
-                            results.append({"f":section_name.decode("utf-8"), "s":s})
-                    except UnicodeDecodeError:
-                        continue
-                # UTF-16LE
-                for m in UTF16_RE.finditer(data):
-                    try:
-                        s = m.group().decode("utf-16le")
-                        if len(s) >= min_len and is_valid_string(s):
-                            results.append({"f":section_name.decode("utf-8"), "s":s})
-                    except UnicodeDecodeError:
-                        continue
+        for section in pe.sections:
+            section_name = section.Name.strip(b'\x00')
+            data = section.get_data()
+            # ASCII
+            for m in PRINTABLE_RE.finditer(data):
+                try:
+                    s = m.group().decode("ascii")
+                    if len(s) >= min_len and is_valid_string(s):
+                        results.append({"f":section_name.decode("utf-8"), "s":s})
+                except UnicodeDecodeError:
+                    continue
+            # UTF-16LE
+            for m in UTF16_RE.finditer(data):
+                try:
+                    s = m.group().decode("utf-16le")
+                    if len(s) >= min_len and is_valid_string(s):
+                        results.append({"f":section_name.decode("utf-8"), "s":s})
+                except UnicodeDecodeError:
+                    continue
         return results
 
     def analyze(self, file_path:str) -> None:
@@ -222,6 +219,8 @@ class ExeAnalyzer(QWidget):
         self.entropy_str = ""
         self.iat_str = ""
         self.strings_str = ""
+        self.all_strings = []
+        self.all_iats = []
         self.label_top.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.search_bar.setVisible(True)
         with pefile.PE(self.file_path) as pe:
@@ -240,33 +239,29 @@ class ExeAnalyzer(QWidget):
             self.entropy_str += get_entropys(pe)
             self.entropy_str += get_section_end_str(False)
 
-            self.update_iat(pe, self.search_bar.text())
-            self.update_strings(pe, self.search_bar.text())
+            self.all_iats = self.extract_iat(pe)
+            self.update_iat(self.search_bar.text())
+            self.all_strings = self.extract_strings(pe)
+            self.update_strings(self.search_bar.text())
         self.update_label()
 
-    def update_iat(self, pe:pefile.PE, search:str="") -> None:
+    def update_iat(self, search:str="") -> None:
         self.iat_str = get_section_entry_str("IAT")
-        total = 0
         search = search.lower()
-        if hasattr(pe, 'DIRECTORY_ENTRY_IMPORT'):
-            for entry in pe.DIRECTORY_ENTRY_IMPORT:
-                dll_name = entry.dll.decode()
-                temp_dll_str = ""
-                for imp in entry.imports:
-                    imp_name = imp.name.decode() if imp.name else "Ordinal"
-                    if not search or search in dll_name.lower() or search in imp_name.lower():
-                        temp_dll_str += f"\t{hex(imp.address)}: {imp_name}\n"
-                        total += 1
-                if temp_dll_str:
-                    self.iat_str += f"DLL: {dll_name}\n" + temp_dll_str
-        self.iat_str += f"TOTAL ENTRIES: {total}\n"
+        filtered = [s for s in self.all_iats if not search or search in s['n'].lower()]
+        self.iat_str += f"TOTAL ENTRIES: {len(self.all_iats)}\n"
+        printed_dlls = []
+        for elem in filtered:
+            if elem["l"] not in printed_dlls:
+                self.iat_str += f"DLL: {elem["l"]}\n"
+                printed_dlls.append(elem["l"])
+            self.iat_str += f"\t{elem['a']} = '{elem['n']}'\n"
         self.iat_str += get_section_end_str()
 
-    def update_strings(self, pe:pefile.PE, search:str="") -> None:
+    def update_strings(self, search:str="") -> None:
         self.strings_str = get_section_entry_str("STRINGS")
-        all_strings = self.extract_strings(self.file_path)
         search = search.lower()
-        filtered = [s for s in all_strings if not search or search in s['s'].lower() or search in s['f'].lower()]
+        filtered = [s for s in self.all_strings if not search or search in s['f'].lower()]
         self.strings_str += f"TOTAL STRINGS = {len(filtered)}\n"
         for elem in filtered:
             self.strings_str += f"{elem['f']} = '{elem['s']}'\n"
