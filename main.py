@@ -1,7 +1,7 @@
 #libs
 import winreg
 import win32com.client
-from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QScrollArea, QLineEdit
+from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QScrollArea, QLineEdit, QCheckBox
 from PyQt6.QtCore import Qt
 #native libs
 from collections import Counter
@@ -129,6 +129,11 @@ class ExeAnalyzer(QWidget):
         self.label_top.setWordWrap(True)
         self.label_top.setTextFormat(Qt.TextFormat.RichText)
 
+        self.string_filter_checkbox = QCheckBox("use valid string filter")
+        self.string_filter_checkbox.setStyleSheet(f"color: {label_color}; font-family: 'Consolas';")
+        self.string_filter_checkbox.setVisible(False)
+        self.string_filter_checkbox.stateChanged.connect(self.on_search_changed) # Opcional: refiltrar ao clicar
+
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Search IAT or Strings...")
         self.search_bar.textChanged.connect(self.on_search_changed)
@@ -141,6 +146,7 @@ class ExeAnalyzer(QWidget):
         self.label_bottom.setTextFormat(Qt.TextFormat.RichText)
 
         self.container_layout.addWidget(self.label_top)
+        self.container_layout.addWidget(self.string_filter_checkbox)
         self.container_layout.addWidget(self.search_bar)
         self.container_layout.addWidget(self.label_bottom)
         
@@ -153,6 +159,7 @@ class ExeAnalyzer(QWidget):
         self.exports_str = []
         self.strings_str = []
         self.file_path = None
+        self.filtered_strings = []
         self.all_strings = []
         self.all_iats = []
         self.all_exports = []
@@ -210,25 +217,30 @@ class ExeAnalyzer(QWidget):
                 self.update_strings(self.search_bar.text())
             self.update_label()
 
-    def extract_strings(self, pe:pefile.PE, min_len:int=4) -> None:
+    def extract_strings(self, pe: pefile.PE, use_filter: bool, min_len: int = 4) -> list:
         results = []
         for section in pe.sections:
-            section_name = section.Name.strip(b'\x00')
+            try:
+                section_name = section.Name.strip(b'\x00').decode("utf-8", errors='ignore')
+            except:
+                section_name = "unknown"
             data = section.get_data()
             # ASCII
             for m in PRINTABLE_RE.finditer(data):
                 try:
                     s = m.group().decode("ascii")
-                    if len(s) >= min_len and is_valid_string(s):
-                        results.append({"f":section_name.decode("utf-8"), "s":s})
+                    if len(s) >= min_len:
+                        if not use_filter or is_valid_string(s):
+                            results.append({"f": section_name, "s": s})
                 except UnicodeDecodeError:
                     continue
             # UTF-16LE
             for m in UTF16_RE.finditer(data):
                 try:
                     s = m.group().decode("utf-16le")
-                    if len(s) >= min_len and is_valid_string(s):
-                        results.append({"f":section_name.decode("utf-8"), "s":s})
+                    if len(s) >= min_len:
+                        if not use_filter or is_valid_string(s):
+                            results.append({"f": section_name, "s": s})
                 except UnicodeDecodeError:
                     continue
         return results
@@ -240,11 +252,13 @@ class ExeAnalyzer(QWidget):
         self.iat_str = []
         self.exports_str = []
         self.strings_str = []
+        self.filtered_strings = []
         self.all_strings = []
         self.all_iats = []
         self.all_exports = []
         self.label_top.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.search_bar.setVisible(True)
+        self.string_filter_checkbox.setVisible(True)
         with pefile.PE(self.file_path) as pe:
             imphash = pe.get_imphash()
             md5 = hashlib.md5(pe.__data__).hexdigest()
@@ -259,7 +273,8 @@ class ExeAnalyzer(QWidget):
             self.entropy_str.append(get_entropys(pe))
             self.all_iats = self.extract_iat(pe)
             self.all_exports = self.extract_exports(pe)
-            self.all_strings = self.extract_strings(pe)
+            self.filtered_strings = self.extract_strings(pe, True)
+            self.all_strings = self.extract_strings(pe, False)
         self.on_search_changed()
 
     DANGEROUS_APIS = {
@@ -343,7 +358,10 @@ class ExeAnalyzer(QWidget):
         self.strings_str = []
         self.strings_str.append(self.get_section_entry_str("STRINGS"))
         search = search.lower()
-        filtered = [s for s in self.all_strings if not search or search in s['s'].lower()]
+        if self.string_filter_checkbox.isChecked():
+            filtered = [s for s in self.filtered_strings if not search or search in s['s'].lower()]
+        else:
+            filtered = [s for s in self.all_strings if not search or search in s['s'].lower()]
         self.strings_str.append(f"TOTAL STRINGS = {len(filtered)}")
         if len(filtered) > 0:
             self.strings_str.append("<br>")
