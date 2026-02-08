@@ -150,10 +150,12 @@ class ExeAnalyzer(QWidget):
         self.info_str = ""
         self.entropy_str = ""
         self.iat_str = ""
+        self.exports_str = ""
         self.strings_str = ""
         self.file_path = None
         self.all_strings = []
         self.all_iats = []
+        self.all_exports = []
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -183,10 +185,20 @@ class ExeAnalyzer(QWidget):
                     results.append({"l":entry.dll.decode(), "a":address, "n":name})
         return results
 
+    def extract_exports(self, pe: pefile.PE):
+        results = []
+        if hasattr(pe, 'DIRECTORY_ENTRY_EXPORT'):
+            for exp in pe.DIRECTORY_ENTRY_EXPORT.symbols:
+                name = exp.name.decode() if exp.name else f"Ordinal {exp.ordinal}"
+                address = hex(pe.OPTIONAL_HEADER.ImageBase + exp.address)
+                results.append({"n": name, "a": address})
+        return results
+
     def on_search_changed(self):
         if self.file_path:
             with pefile.PE(self.file_path) as pe:
                 self.update_iat(self.search_bar.text())
+                self.update_exports(self.search_bar.text())
                 self.update_strings(self.search_bar.text())
             self.update_label()
 
@@ -218,9 +230,11 @@ class ExeAnalyzer(QWidget):
         self.info_str = ""
         self.entropy_str = ""
         self.iat_str = ""
+        self.exports_str = ""
         self.strings_str = ""
         self.all_strings = []
         self.all_iats = []
+        self.all_exports = []
         self.label_top.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.search_bar.setVisible(True)
         with pefile.PE(self.file_path) as pe:
@@ -240,16 +254,15 @@ class ExeAnalyzer(QWidget):
             self.entropy_str += get_section_end_str(False)
 
             self.all_iats = self.extract_iat(pe)
-            self.update_iat(self.search_bar.text())
+            self.all_exports = self.extract_exports(pe)
             self.all_strings = self.extract_strings(pe)
-            self.update_strings(self.search_bar.text())
-        self.update_label()
+        self.on_search_changed()
 
-    def update_iat(self, search:str="") -> None:
+    def update_iat(self, search:str=None) -> None:
         self.iat_str = get_section_entry_str("IAT")
         search = search.lower()
         filtered = [s for s in self.all_iats if not search or search in s['n'].lower()]
-        self.iat_str += f"TOTAL ENTRIES: {len(self.all_iats)}\n"
+        self.iat_str += f"TOTAL IMPORTS: {len(self.all_iats)}\n"
         printed_dlls = []
         for elem in filtered:
             if elem["l"] not in printed_dlls:
@@ -258,10 +271,19 @@ class ExeAnalyzer(QWidget):
             self.iat_str += f"\t{elem['a']} = '{elem['n']}'\n"
         self.iat_str += get_section_end_str()
 
-    def update_strings(self, search:str="") -> None:
+    def update_exports(self, search:str=None) -> None:
+        self.exports_str = get_section_entry_str("EXPORTS")
+        search = search.lower()
+        filtered = [s for s in self.all_exports if not search or search in s['n'].lower()]
+        self.exports_str += f"TOTAL EXPORTS: {len(self.all_exports)}\n"
+        for elem in filtered:
+            self.exports_str += f"name: {elem["n"]}, address: {elem["a"]}\n"
+        self.exports_str += get_section_end_str()
+
+    def update_strings(self, search:str=None) -> None:
         self.strings_str = get_section_entry_str("STRINGS")
         search = search.lower()
-        filtered = [s for s in self.all_strings if not search or search in s['f'].lower()]
+        filtered = [s for s in self.all_strings if not search or search in s['s'].lower()]
         self.strings_str += f"TOTAL STRINGS = {len(filtered)}\n"
         for elem in filtered:
             self.strings_str += f"{elem['f']} = '{elem['s']}'\n"
@@ -269,7 +291,7 @@ class ExeAnalyzer(QWidget):
 
     def update_label(self) -> None:
         self.label_top.setText(self.info_str + self.entropy_str)
-        self.label_bottom.setText(self.iat_str + self.strings_str)
+        self.label_bottom.setText(self.iat_str + self.exports_str + self.strings_str)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
