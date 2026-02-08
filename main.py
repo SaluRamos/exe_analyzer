@@ -1,7 +1,7 @@
 #libs
 import winreg
 import win32com.client
-from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QScrollArea, QLineEdit, QCheckBox, QTabWidget
+from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QScrollArea, QLineEdit, QCheckBox, QTabWidget, QPushButton
 from PyQt6.QtCore import Qt
 #native libs
 from collections import Counter
@@ -127,6 +127,12 @@ class ExeAnalyzer(QWidget):
         self.container_layout.setSpacing(0) # Cola os widgets verticalmente
         self.container_layout.setAlignment(Qt.AlignmentFlag.AlignTop) # Empilha tudo no topo
 
+        self.file_path = None #pré declaração
+
+        self.btn_update = QPushButton("Update", self)
+        self.btn_update.setFixedWidth(100)
+        self.btn_update.clicked.connect(lambda: self.analyze(self.file_path))
+
         self.label_top = QLabel('Arraste o arquivo .exe aqui', self)
         self.label_top.setStyleSheet(f"font-family: 'Consolas'; color: {label_color};")
         self.label_top.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -136,14 +142,13 @@ class ExeAnalyzer(QWidget):
         self.string_filter_checkbox = QCheckBox("use valid string filter")
         self.string_filter_checkbox.setStyleSheet(f"color: {label_color}; font-family: 'Consolas';")
         self.string_filter_checkbox.setVisible(False)
-        self.string_filter_checkbox.stateChanged.connect(self.on_search_changed) # Opcional: refiltrar ao clicar
+        self.string_filter_checkbox.stateChanged.connect(self.on_search_changed)
 
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Search IAT or Strings...")
         self.search_bar.textChanged.connect(self.on_search_changed)
         self.search_bar.setVisible(False)
 
-        self.file_path = None
         self.tabs = QTabWidget()
         self.tabs.setStyleSheet(f"color: {label_color}; font-family: 'Consolas';")
         self.tabs.currentChanged.connect(self.on_search_changed)
@@ -160,6 +165,7 @@ class ExeAnalyzer(QWidget):
         self.tabs.addTab(self.label_exports, "Exports")
         self.tabs.addTab(self.label_strings, "Strings")
 
+        self.container_layout.addWidget(self.btn_update, alignment=Qt.AlignmentFlag.AlignCenter)
         self.container_layout.addWidget(self.label_top)
         self.container_layout.addWidget(self.string_filter_checkbox)
         self.container_layout.addWidget(self.search_bar)
@@ -269,6 +275,9 @@ class ExeAnalyzer(QWidget):
         return results
 
     def analyze(self, file_path:str) -> None:
+        print(f"analyzing: {file_path}")
+        if file_path == None:
+            return
         self.file_path = file_path
         self.info_str = []
         self.entropy_str = []
@@ -291,7 +300,7 @@ class ExeAnalyzer(QWidget):
             self.info_str.append(f"File: {os.path.basename(self.file_path)}<br>")
             self.info_str.append(f"Creation TimeStamp: {creation_timestamp} ({creation_date})<br>")
             self.info_str.append(f"MD5: {md5}<br>")
-            self.info_str.append(f"ImpHash: {imphash}<br>")
+            self.info_str.append(f"ImpHash: {imphash}")
             self.entropy_str.append(self.get_section_entry_str("ENTROPY"))
             self.entropy_str.append(get_entropys(pe))
             self.all_iats = self.extract_iat(pe)
