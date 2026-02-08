@@ -168,7 +168,7 @@ class ExeAnalyzer(QWidget):
                 target = get_shortcut_target(file_path)
                 if target:
                     file_path = target
-            if file_path.lower().endswith('.exe'):
+            if file_path.lower().endswith(('.exe', '.dll')):
                 self.analyze(file_path)
             else:
                 self.label.setText("Erro: Arraste apenas arquivos .exe")
@@ -277,9 +277,8 @@ if __name__ == "__main__":
     ex.show()
     if len(sys.argv) > 1:
         file_to_open = sys.argv[1]
-        if os.path.exists(file_to_open) and file_to_open.lower().endswith(('.exe', '.lnk')):
+        if os.path.exists(file_to_open) and file_to_open.lower().endswith(('.exe', '.lnk', '.dll')):
             if file_to_open.lower().endswith('.lnk'):
                 file_to_open = get_shortcut_target(file_to_open)
-            if file_to_open:
-                ex.analyze(file_to_open)
+            ex.analyze(file_to_open)
     sys.exit(app.exec())
