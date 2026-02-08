@@ -13,6 +13,7 @@ import hashlib
 import struct
 from datetime import datetime
 import re
+import html
 
 #--------------------------------------------STRINGS--------------------------------------------
 
@@ -102,7 +103,7 @@ class ExeAnalyzer(QWidget):
     def initUI(self):
         self.setWindowTitle('Exe analyzer')
         self.resize(440, 700)
-        self.setMinimumWidth(440) 
+        self.setMinimumWidth(460) 
         self.setMinimumHeight(500)
         self.setAcceptDrops(True)
         label_color = "white" if get_windows_theme() else "black"
@@ -336,7 +337,9 @@ class ExeAnalyzer(QWidget):
         filtered = [s for s in self.all_strings if not search or search in s['s'].lower()]
         self.strings_str += f"TOTAL STRINGS = {len(filtered)}<br>"
         for elem in filtered:
-            self.strings_str += f"{elem['f']} = '{elem['s']}'<br>"
+            line = f"{elem['f']} = '{elem['s']}'"
+            safe_data = html.escape(str(line))
+            self.strings_str += f"{safe_data}<br>"
 
     def update_label(self) -> None:
         self.label_top.setText(self.info_str + self.entropy_str)
