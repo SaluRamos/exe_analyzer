@@ -1,7 +1,7 @@
 #libs
 import winreg
 import win32com.client
-from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QScrollArea, QLineEdit, QCheckBox
+from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QScrollArea, QLineEdit, QCheckBox, QTabWidget
 from PyQt6.QtCore import Qt
 #native libs
 from collections import Counter
@@ -139,16 +139,27 @@ class ExeAnalyzer(QWidget):
         self.search_bar.textChanged.connect(self.on_search_changed)
         self.search_bar.setVisible(False)
 
-        self.label_bottom = QLabel('', self)
-        self.label_bottom.setStyleSheet(f"font-family: 'Consolas'; color: {label_color};")
-        self.label_bottom.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.label_bottom.setWordWrap(True)
-        self.label_bottom.setTextFormat(Qt.TextFormat.RichText)
+        self.file_path = None
+        self.tabs = QTabWidget()
+        self.tabs.setStyleSheet(f"color: {label_color}; font-family: 'Consolas';")
+        self.tabs.currentChanged.connect(self.on_search_changed)
+        self.label_imports = QLabel("")
+        self.label_exports = QLabel("")
+        self.label_strings = QLabel("")
+        for label in [self.label_imports, self.label_exports, self.label_strings]:
+            label.setStyleSheet(f"font-family: 'Consolas'; color: {label_color};")
+            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            label.setWordWrap(True)
+            label.setTextFormat(Qt.TextFormat.RichText)
+            label.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.tabs.addTab(self.label_imports, "Imports")
+        self.tabs.addTab(self.label_exports, "Exports")
+        self.tabs.addTab(self.label_strings, "Strings")
 
         self.container_layout.addWidget(self.label_top)
         self.container_layout.addWidget(self.string_filter_checkbox)
         self.container_layout.addWidget(self.search_bar)
-        self.container_layout.addWidget(self.label_bottom)
+        self.container_layout.addWidget(self.tabs)
         
         self.scroll.setWidget(self.container)
         layout.addWidget(self.scroll)
@@ -158,7 +169,6 @@ class ExeAnalyzer(QWidget):
         self.iat_str = []
         self.exports_str = []
         self.strings_str = []
-        self.file_path = None
         self.filtered_strings = []
         self.all_strings = []
         self.all_iats = []
@@ -211,11 +221,20 @@ class ExeAnalyzer(QWidget):
 
     def on_search_changed(self):
         if self.file_path:
-            with pefile.PE(self.file_path) as pe:
+            title = self.tabs.tabText(self.tabs.currentIndex())
+            # print(title)
+            if title == "Imports":
                 self.update_iat(self.search_bar.text())
+                iat_final = "".join(self.iat_str)
+                self.label_imports.setText(iat_final)
+            elif title == "Exports":
                 self.update_exports(self.search_bar.text())
+                exports_final = "".join(self.exports_str)
+                self.label_exports.setText(exports_final)
+            else:
                 self.update_strings(self.search_bar.text())
-            self.update_label()
+                strings_final = "".join(self.strings_str)
+                self.label_strings.setText(strings_final)
 
     def extract_strings(self, pe: pefile.PE, use_filter: bool, min_len: int = 4) -> list:
         results = []
@@ -275,6 +294,9 @@ class ExeAnalyzer(QWidget):
             self.all_exports = self.extract_exports(pe)
             self.filtered_strings = self.extract_strings(pe, True)
             self.all_strings = self.extract_strings(pe, False)
+        info_final = "".join(self.info_str)
+        entropys_final = "".join(self.entropy_str)
+        self.label_top.setText(info_final + entropys_final)
         self.on_search_changed()
 
     DANGEROUS_APIS = {
@@ -321,7 +343,6 @@ class ExeAnalyzer(QWidget):
 
     def update_iat(self, search:str=None) -> None:
         self.iat_str = []
-        self.iat_str.append(self.get_section_entry_str("IMPORTS"))
         search = search.lower()
         filtered = [s for s in self.all_iats if not search or search in s['n'].lower()]
         self.iat_str.append(f"TOTAL IMPORTS: {len(self.all_iats)}")
@@ -343,7 +364,6 @@ class ExeAnalyzer(QWidget):
 
     def update_exports(self, search:str=None) -> None:
         self.exports_str = []
-        self.exports_str.append(self.get_section_entry_str("EXPORTS"))
         search = search.lower()
         filtered = [s for s in self.all_exports if not search or search in s['n'].lower()]
         self.exports_str.append(f"TOTAL EXPORTS: {len(self.all_exports)}")
@@ -356,7 +376,6 @@ class ExeAnalyzer(QWidget):
 
     def update_strings(self, search:str=None) -> None:
         self.strings_str = []
-        self.strings_str.append(self.get_section_entry_str("STRINGS"))
         search = search.lower()
         if self.string_filter_checkbox.isChecked():
             filtered = [s for s in self.filtered_strings if not search or search in s['s'].lower()]
@@ -370,15 +389,7 @@ class ExeAnalyzer(QWidget):
             safe_data = html.escape(str(line))
             self.strings_str.append(f"{safe_data}<br>")
         self.strings_str[-1][:-4] #remove o ultimo <br>
-
-    def update_label(self) -> None:
-        info_final = "".join(self.info_str)
-        entropys_final = "".join(self.entropy_str)
-        iat_final = "".join(self.iat_str)
-        exports_final = "".join(self.exports_str)
-        strings_final = "".join(self.strings_str)
-        self.label_top.setText(info_final + entropys_final)
-        self.label_bottom.setText(iat_final + exports_final + strings_final)
+        
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
