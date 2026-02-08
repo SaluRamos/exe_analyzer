@@ -41,13 +41,13 @@ def get_section_entry_str(name:str) -> str:
     if (each_side_amount*2) + len(name) < SECTION_TOTAL_SIZE:
         increment = "-"
     each_side = "-"*each_side_amount
-    out = each_side + increment + name + each_side + "\n"
+    out = each_side + increment + name + each_side + "<br>"
     return out
 
 def get_section_end_str(newline:bool=True) -> str:
     out = "-"*SECTION_TOTAL_SIZE
     if newline:
-        out += "\n"
+        out += "<br>"
     return out
 
 #--------------------------------------------INFO--------------------------------------------
@@ -68,9 +68,9 @@ def get_entropys(pe:pefile.PE) -> str:
     for s in pe.sections:
         entropy = _calculate_entropy(s.get_data())
         section_name = s.Name.decode('utf-8', errors='ignore').split('\x00')[0]
-        out += f"{section_name:<20} {entropy:>10.4f}\n"
+        out += f"{section_name:<20} {entropy:>10.4f}<br>"
     full_entropy = _calculate_entropy(pe.__data__)
-    out += f"{'FILE ENTROPY':<20} {full_entropy:>10.4f}\n"
+    out += f"{'FILE ENTROPY':<20} {full_entropy:>10.4f}<br>"
     return out
 
 def read_pe_timestamp(file_path):
@@ -129,6 +129,7 @@ class ExeAnalyzer(QWidget):
         self.label_top.setStyleSheet(f"font-family: 'Consolas'; color: {label_color};")
         self.label_top.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.label_top.setWordWrap(False)
+        self.label_top.setTextFormat(Qt.TextFormat.RichText)
 
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Search IAT or Strings...")
@@ -139,6 +140,7 @@ class ExeAnalyzer(QWidget):
         self.label_bottom.setStyleSheet(f"font-family: 'Consolas'; color: {label_color};")
         self.label_bottom.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.label_bottom.setWordWrap(False)
+        self.label_bottom.setTextFormat(Qt.TextFormat.RichText)
 
         self.container_layout.addWidget(self.label_top)
         self.container_layout.addWidget(self.search_bar)
@@ -243,16 +245,14 @@ class ExeAnalyzer(QWidget):
             self.info_str = get_section_entry_str("INFO")
             creation_timestamp = read_pe_timestamp(self.file_path)
             creation_date = datetime.fromtimestamp(creation_timestamp).strftime('%d/%m/%Y %H:%M:%S')
-            self.info_str += f"File: {os.path.basename(self.file_path)}\n"
-            self.info_str += f"Creation TimeStamp: {creation_timestamp} ({creation_date})\n"
-            self.info_str += f"MD5: {md5}\n"
-            self.info_str += f"ImpHash: {imphash}\n"
+            self.info_str += f"File: {os.path.basename(self.file_path)}<br>"
+            self.info_str += f"Creation TimeStamp: {creation_timestamp} ({creation_date})<br>"
+            self.info_str += f"MD5: {md5}<br>"
+            self.info_str += f"ImpHash: {imphash}<br>"
             self.info_str += get_section_end_str()
-
             self.entropy_str = get_section_entry_str("ENTROPY")
             self.entropy_str += get_entropys(pe)
             self.entropy_str += get_section_end_str(False)
-
             self.all_iats = self.extract_iat(pe)
             self.all_exports = self.extract_exports(pe)
             self.all_strings = self.extract_strings(pe)
@@ -262,31 +262,35 @@ class ExeAnalyzer(QWidget):
         self.iat_str = get_section_entry_str("IAT")
         search = search.lower()
         filtered = [s for s in self.all_iats if not search or search in s['n'].lower()]
-        self.iat_str += f"TOTAL IMPORTS: {len(self.all_iats)}\n"
+        self.iat_str += f"TOTAL IMPORTS: {len(self.all_iats)}<br>"
         printed_dlls = []
         for elem in filtered:
             if elem["l"] not in printed_dlls:
-                self.iat_str += f"DLL: {elem["l"]}\n"
+                self.iat_str += f"DLL: {elem["l"]}<br>"
                 printed_dlls.append(elem["l"])
-            self.iat_str += f"\t{elem['a']} = '{elem['n']}'\n"
+            line = f"{elem['a']} = '{elem['n']}'"
+            line = ("&nbsp;" * 8) + line #tab
+            self.iat_str += f"{line}<br>"
+            # self.exports_str += f"<span style='color: red;'>{line}</span><br>"
         self.iat_str += get_section_end_str()
 
     def update_exports(self, search:str=None) -> None:
         self.exports_str = get_section_entry_str("EXPORTS")
         search = search.lower()
         filtered = [s for s in self.all_exports if not search or search in s['n'].lower()]
-        self.exports_str += f"TOTAL EXPORTS: {len(self.all_exports)}\n"
+        self.exports_str += f"TOTAL EXPORTS: {len(self.all_exports)}<br>"
         for elem in filtered:
-            self.exports_str += f"name: {elem["n"]}, address: {elem["a"]}\n"
+            line = f"name: {elem["n"]}, address: {elem["a"]}"
+            self.exports_str += line
         self.exports_str += get_section_end_str()
 
     def update_strings(self, search:str=None) -> None:
         self.strings_str = get_section_entry_str("STRINGS")
         search = search.lower()
         filtered = [s for s in self.all_strings if not search or search in s['s'].lower()]
-        self.strings_str += f"TOTAL STRINGS = {len(filtered)}\n"
+        self.strings_str += f"TOTAL STRINGS = {len(filtered)}<br>"
         for elem in filtered:
-            self.strings_str += f"{elem['f']} = '{elem['s']}'\n"
+            self.strings_str += f"{elem['f']} = '{elem['s']}'<br>"
         self.strings_str += get_section_end_str(False)
 
     def update_label(self) -> None:
