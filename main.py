@@ -2,7 +2,9 @@
 import winreg
 import win32com.client
 from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QScrollArea, QLineEdit, QCheckBox, QTabWidget, QPushButton
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 #native libs
 from collections import Counter
 import sys
@@ -14,6 +16,7 @@ import struct
 from datetime import datetime
 import re
 import html
+import time
 
 CLANG_CRT_APIS = [ "GetCurrentProcessId", "GetCurrentThreadId", "RaiseException", "RtlPcToFileHeader", "WriteFile", "GetCurrentProcess", "GetModuleHandleExW", "FindFirstFileExW", "FindNextFileW", "GetEnvironmentStringsW", "SetEnvironmentVariableW", "VirtualProtect", "QueryPerformanceCounter", "GetSystemTimeAsFileTime", "InitializeSListHead", "SetUnhandledExceptionFilter", "GetStartupInfoW", "GetModuleHandleW", "WriteConsoleW", "RtlUnwindEx", "GetLastError", "SetLastError", "FlsAlloc", "FlsGetValue", "FlsSetValue", "FlsFree", "EnterCriticalSection", "LeaveCriticalSection", "InitializeCriticalSectionEx", "DeleteCriticalSection", "RtlLookupFunctionEntry", "EncodePointer", "GetStdHandle", "GetModuleFileNameW", "ExitProcess", "TerminateProcess", "FreeLibrary", "GetProcAddress", "GetCommandLineA", "GetCommandLineW", "IsProcessorFeaturePresent", "RtlCaptureContext", "RtlVirtualUnwind", "IsDebuggerPresent", "UnhandledExceptionFilter", "HeapAlloc", "HeapFree", "FindClose", "IsValidCodePage", "GetACP", "GetOEMCP", "GetCPInfo", "MultiByteToWideChar", "WideCharToMultiByte", "FreeEnvironmentStringsW", "SetStdHandle", "GetFileType", "GetStringTypeW", "LoadLibraryExW", "CompareStringW", "LCMapStringW", "GetProcessHeap", "HeapSize", "HeapReAlloc", "FlushFileBuffers", "GetConsoleOutputCP", "GetConsoleMode", "SetFilePointerEx", "CreateFileW", "CloseHandle" ]
 
@@ -98,13 +101,30 @@ def get_shortcut_target(shortcut_path):
     except Exception:
         return None
 
+#--------------------------------------------CLASSES--------------------------------------------
+
+class MyHandler(FileSystemEventHandler):
+
+    def __init__(self, app: ExeAnalyzer):
+        self.app = app
+        super().__init__()
+
+    def on_modified(self, event) -> None:
+        if not event.is_directory:
+            if os.path.abspath(event.src_path) == os.path.abspath(self.app.file_path):
+                print(f"O arquivo {event.src_path} foi modificado!")
+                self.app.update_signal.emit(self.app.file_path)
+
 class ExeAnalyzer(QWidget):
+
+    update_signal = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
         self.initUI()
+        self.update_signal.connect(self.run_analysis_safe)
         
-    def initUI(self):
+    def initUI(self) -> None:
         self.setWindowTitle('Exe analyzer by Salu C Ramos')
         self.setFixedSize(460, 700)
         # self.resize(440, 700)
@@ -131,7 +151,7 @@ class ExeAnalyzer(QWidget):
 
         self.btn_update = QPushButton("Update", self)
         self.btn_update.setFixedWidth(100)
-        self.btn_update.clicked.connect(lambda: self.analyze(self.file_path))
+        self.btn_update.clicked.connect(lambda: self.run_analysis_safe(self.file_path))
 
         self.label_top = QLabel('Arraste o arquivo .exe aqui', self)
         self.label_top.setStyleSheet(f"font-family: 'Consolas'; color: {label_color};")
@@ -183,14 +203,15 @@ class ExeAnalyzer(QWidget):
         self.all_strings = []
         self.all_iats = []
         self.all_exports = []
+        self.observer = None
 
-    def dragEnterEvent(self, event):
+    def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
             event.accept()
         else:
             event.ignore()
 
-    def dropEvent(self, event):
+    def dropEvent(self, event) -> None:
         files = [u.toLocalFile() for u in event.mimeData().urls()]
         for file_path in files:
             if file_path.lower().endswith('.lnk'):
@@ -229,7 +250,7 @@ class ExeAnalyzer(QWidget):
                 results.append({"n": name, "a": address})
         return results
 
-    def on_search_changed(self):
+    def on_search_changed(self) -> None:
         if self.file_path:
             title = self.tabs.tabText(self.tabs.currentIndex())
             # print(title)
@@ -274,10 +295,25 @@ class ExeAnalyzer(QWidget):
                     continue
         return results
 
-    def analyze(self, file_path:str) -> None:
-        print(f"analyzing: {file_path}")
-        if file_path == None:
+    def analyze(self, file_path: str) -> None:
+        """Configura o monitoramento e roda a primeira análise"""
+        if file_path is None:
             return
+        self.file_path = os.path.abspath(file_path)
+        # Configura o observer apenas se for um arquivo novo
+        if self.observer:
+            self.observer.stop()
+            self.observer.join()
+        self.observer = Observer()
+        directory = os.path.dirname(self.file_path)
+        self.observer.schedule(MyHandler(self), directory, recursive=False)
+        print(f"Monitorando: {self.file_path}")
+        self.observer.start()
+        self.run_analysis_safe(self.file_path)
+
+    def run_analysis_safe(self, file_path: str):
+        """Método que roda na Thread Principal e atualiza a GUI"""
+        print(f"analyzing: {file_path}")
         self.file_path = file_path
         self.info_str = []
         self.entropy_str = []
@@ -291,25 +327,43 @@ class ExeAnalyzer(QWidget):
         self.label_top.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.search_bar.setVisible(True)
         self.string_filter_checkbox.setVisible(True)
-        with pefile.PE(self.file_path) as pe:
-            imphash = pe.get_imphash()
-            md5 = hashlib.md5(pe.__data__).hexdigest()
-            self.info_str.append(self.get_section_entry_str("INFO"))
-            creation_timestamp = read_pe_timestamp(self.file_path)
-            creation_date = datetime.fromtimestamp(creation_timestamp).strftime('%d/%m/%Y %H:%M:%S')
-            self.info_str.append(f"File: {os.path.basename(self.file_path)}<br>")
-            self.info_str.append(f"Creation TimeStamp: {creation_timestamp} ({creation_date})<br>")
-            self.info_str.append(f"MD5: {md5}<br>")
-            self.info_str.append(f"ImpHash: {imphash}")
-            self.entropy_str.append(self.get_section_entry_str("ENTROPY"))
-            self.entropy_str.append(get_entropys(pe))
-            self.all_iats = self.extract_iat(pe)
-            self.all_exports = self.extract_exports(pe)
-            self.filtered_strings = self.extract_strings(pe, True)
-            self.all_strings = self.extract_strings(pe, False)
+
+        pe = None
+        max_retries = 20
+        for attempt in range(max_retries):
+            try:
+                pe = pefile.PE(file_path)
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"attempt {attempt}")
+                    time.sleep(0.5)
+                else:
+                    print("Erro: O arquivo permaneceu bloqueado por muito tempo.")
+                    return
+                
+        imphash = pe.get_imphash()
+        md5 = hashlib.md5(pe.__data__).hexdigest()
+        self.info_str.append(self.get_section_entry_str("INFO"))
+        creation_timestamp = read_pe_timestamp(self.file_path)
+        creation_date = datetime.fromtimestamp(creation_timestamp).strftime('%d/%m/%Y %H:%M:%S')
+        self.info_str.append(f"File: {os.path.basename(self.file_path)}<br>")
+        self.info_str.append(f"Creation TimeStamp: {creation_timestamp} ({creation_date})<br>")
+        self.info_str.append(f"MD5: {md5}<br>")
+        self.info_str.append(f"ImpHash: {imphash}")
+        self.entropy_str.append(self.get_section_entry_str("ENTROPY"))
+        self.entropy_str.append(get_entropys(pe))
+        self.all_iats = self.extract_iat(pe)
+        self.all_exports = self.extract_exports(pe)
+        self.filtered_strings = self.extract_strings(pe, True)
+        self.all_strings = self.extract_strings(pe, False)
+
+        pe.close()
+
         info_final = "".join(self.info_str)
         entropys_final = "".join(self.entropy_str)
         self.label_top.setText(info_final + entropys_final)
+
         self.on_search_changed()
 
     def update_iat(self, search:str=None) -> None:
@@ -364,7 +418,6 @@ class ExeAnalyzer(QWidget):
             self.strings_str.append(f"{safe_data}<br>")
         self.strings_str[-1][:-4] #remove o ultimo <br>
         
-
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     ex = ExeAnalyzer()
