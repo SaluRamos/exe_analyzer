@@ -275,4 +275,11 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     ex = ExeAnalyzer()
     ex.show()
+    if len(sys.argv) > 1:
+        file_to_open = sys.argv[1]
+        if os.path.exists(file_to_open) and file_to_open.lower().endswith(('.exe', '.lnk')):
+            if file_to_open.lower().endswith('.lnk'):
+                file_to_open = get_shortcut_target(file_to_open)
+            if file_to_open:
+                ex.analyze(file_to_open)
     sys.exit(app.exec())
