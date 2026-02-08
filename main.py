@@ -31,25 +31,6 @@ def is_valid_string(s: str) -> bool:
         return False
     return True
 
-#--------------------------------------------PRINT--------------------------------------------
-
-SECTION_TOTAL_SIZE = 50
-
-def get_section_entry_str(name:str) -> str:
-    each_side_amount = int((SECTION_TOTAL_SIZE - len(name))/2)
-    increment = ""
-    if (each_side_amount*2) + len(name) < SECTION_TOTAL_SIZE:
-        increment = "-"
-    each_side = "-"*each_side_amount
-    out = each_side + increment + name + each_side + "<br>"
-    return out
-
-def get_section_end_str(newline:bool=True) -> str:
-    out = "-"*SECTION_TOTAL_SIZE
-    if newline:
-        out += "<br>"
-    return out
-
 #--------------------------------------------INFO--------------------------------------------
 
 def _calculate_entropy(data) -> float:
@@ -63,14 +44,26 @@ def _calculate_entropy(data) -> float:
         entropy -= p_x * math.log(p_x, 2)
     return entropy
 
-def get_entropys(pe:pefile.PE) -> str:
-    out = ""
+def get_entropys(pe: pefile.PE) -> str:
+    table_style = "style='width: 100%; border-collapse: collapse; font-family: Consolas;'"
+    out = f"<table {table_style}>"
     for s in pe.sections:
         entropy = _calculate_entropy(s.get_data())
         section_name = s.Name.decode('utf-8', errors='ignore').split('\x00')[0]
-        out += f"{section_name:<20} {entropy:>10.4f}<br>"
+        out += (
+            f"<tr>"
+            f"<td style='padding: 2px 10px;'>{section_name}</td>"
+            f"<td style='padding: 2px 10px; text-align: right;'>{entropy:.4f}</td>"
+            f"</tr>"
+        )
     full_entropy = _calculate_entropy(pe.__data__)
-    out += f"{'FILE ENTROPY':<20} {full_entropy:>10.4f}<br>"
+    out += (
+        f"<tr>"
+        f"<td style='padding: 4px 10px;'><b>FILE ENTROPY</b></td>"
+        f"<td style='padding: 4px 10px; text-align: right;'><b>{full_entropy:.4f}</b></td>"
+        f"</tr>"
+    )
+    out += "</table>"
     return out
 
 def read_pe_timestamp(file_path):
@@ -109,6 +102,8 @@ class ExeAnalyzer(QWidget):
     def initUI(self):
         self.setWindowTitle('Exe analyzer')
         self.resize(440, 700)
+        self.setMinimumWidth(440) 
+        self.setMinimumHeight(500)
         self.setAcceptDrops(True)
         label_color = "white" if get_windows_theme() else "black"
         
@@ -120,6 +115,7 @@ class ExeAnalyzer(QWidget):
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         
         self.container = QWidget()
+        self.container.setMinimumWidth(440)
         self.container_layout = QVBoxLayout(self.container)
         self.container_layout.setContentsMargins(5, 5, 5, 5) # Pequeno respiro nas bordas
         self.container_layout.setSpacing(0) # Cola os widgets verticalmente
@@ -128,7 +124,7 @@ class ExeAnalyzer(QWidget):
         self.label_top = QLabel('Arraste o arquivo .exe aqui', self)
         self.label_top.setStyleSheet(f"font-family: 'Consolas'; color: {label_color};")
         self.label_top.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.label_top.setWordWrap(False)
+        self.label_top.setWordWrap(True)
         self.label_top.setTextFormat(Qt.TextFormat.RichText)
 
         self.search_bar = QLineEdit()
@@ -139,7 +135,7 @@ class ExeAnalyzer(QWidget):
         self.label_bottom = QLabel('', self)
         self.label_bottom.setStyleSheet(f"font-family: 'Consolas'; color: {label_color};")
         self.label_bottom.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.label_bottom.setWordWrap(False)
+        self.label_bottom.setWordWrap(True)
         self.label_bottom.setTextFormat(Qt.TextFormat.RichText)
 
         self.container_layout.addWidget(self.label_top)
@@ -176,6 +172,14 @@ class ExeAnalyzer(QWidget):
                 self.analyze(file_path)
             else:
                 self.label.setText("Erro: Arraste apenas arquivos .exe")
+
+    def get_section_entry_str(self, name:str) -> str:
+        out = (
+            f"<div style='text-align: center; width: 100%;'>"
+            f"<span style='background-color: green; color: white; padding: 2px 10px;'>{name}</span>"
+            f"</div>"
+        )
+        return out
 
     def extract_iat(self, pe:pefile.PE) -> str:
         results = []
@@ -242,27 +246,68 @@ class ExeAnalyzer(QWidget):
         with pefile.PE(self.file_path) as pe:
             imphash = pe.get_imphash()
             md5 = hashlib.md5(pe.__data__).hexdigest()
-            self.info_str = get_section_entry_str("INFO")
+            self.info_str = self.get_section_entry_str("INFO")
             creation_timestamp = read_pe_timestamp(self.file_path)
             creation_date = datetime.fromtimestamp(creation_timestamp).strftime('%d/%m/%Y %H:%M:%S')
             self.info_str += f"File: {os.path.basename(self.file_path)}<br>"
             self.info_str += f"Creation TimeStamp: {creation_timestamp} ({creation_date})<br>"
             self.info_str += f"MD5: {md5}<br>"
             self.info_str += f"ImpHash: {imphash}<br>"
-            self.info_str += get_section_end_str()
-            self.entropy_str = get_section_entry_str("ENTROPY")
+            self.entropy_str = self.get_section_entry_str("ENTROPY")
             self.entropy_str += get_entropys(pe)
-            self.entropy_str += get_section_end_str(False)
             self.all_iats = self.extract_iat(pe)
             self.all_exports = self.extract_exports(pe)
             self.all_strings = self.extract_strings(pe)
         self.on_search_changed()
 
+    DANGEROUS_APIS = {
+        # Process / Thread manipulation
+        "CreateProcessA", "CreateProcessW",
+        "NtCreateProcess", "NtCreateProcessEx",
+        "CreateRemoteThread",
+        "NtCreateThread", "NtCreateThreadEx",
+        "ResumeThread", "SuspendThread",
+        "GetThreadContext", "SetThreadContext",
+        "Wow64GetThreadContext", "Wow64SetThreadContext",
+        # Memory / Injection
+        "VirtualAlloc", "VirtualAllocEx",
+        "VirtualProtect", "VirtualProtectEx",
+        "WriteProcessMemory", "ReadProcessMemory",
+        "NtAllocateVirtualMemory", "NtProtectVirtualMemory",
+        "NtWriteVirtualMemory", "NtReadVirtualMemory",
+        "MapViewOfFile", "UnmapViewOfFile",
+        "NtMapViewOfSection", "NtUnmapViewOfSection",
+        # DLL loading / resolving
+        "LoadLibraryA", "LoadLibraryW",
+        "LoadLibraryExA", "LoadLibraryExW",
+        "GetProcAddress",
+        "LdrLoadDll", "LdrGetProcedureAddress",
+        # Anti-debug / Anti-analysis
+        "IsDebuggerPresent", "CheckRemoteDebuggerPresent",
+        "NtQueryInformationProcess", "NtSetInformationThread",
+        "OutputDebugString", "DebugActiveProcess", "DebugBreak",
+        # Persistence / system
+        "CreateServiceA", "CreateServiceW",
+        "OpenSCManagerA", "OpenSCManagerW",
+        "RegCreateKeyExA", "RegCreateKeyExW",
+        "RegSetValueExA", "RegSetValueExW",
+        # Network / C2
+        "socket", "connect", "send", "recv", "WSAStartup",
+        "InternetOpenA", "InternetOpenW", "InternetReadFile",
+        "HttpSendRequestA", "HttpSendRequestW",
+        "WinHttpSendRequest",
+        # Crypto / packing
+        "CryptAcquireContext", "CryptEncrypt", "CryptDecrypt",
+        "CryptCreateHash", "CryptHashData",
+        "BCryptEncrypt", "BCryptDecrypt",
+    }
+
     def update_iat(self, search:str=None) -> None:
-        self.iat_str = get_section_entry_str("IAT")
+        self.iat_str = self.get_section_entry_str("IAT")
         search = search.lower()
         filtered = [s for s in self.all_iats if not search or search in s['n'].lower()]
         self.iat_str += f"TOTAL IMPORTS: {len(self.all_iats)}<br>"
+        total_flags = 0
         printed_dlls = []
         for elem in filtered:
             if elem["l"] not in printed_dlls:
@@ -270,28 +315,28 @@ class ExeAnalyzer(QWidget):
                 printed_dlls.append(elem["l"])
             line = f"{elem['a']} = '{elem['n']}'"
             line = ("&nbsp;" * 8) + line #tab
+            if elem['n'] in self.DANGEROUS_APIS:
+                line = f"<span style='color: red;'>{line}</span>"
+                total_flags += 1
             self.iat_str += f"{line}<br>"
-            # self.exports_str += f"<span style='color: red;'>{line}</span><br>"
-        self.iat_str += get_section_end_str()
+        self.iat_str += f"TOTAL FLAGS: {total_flags}"
 
     def update_exports(self, search:str=None) -> None:
-        self.exports_str = get_section_entry_str("EXPORTS")
+        self.exports_str = self.get_section_entry_str("EXPORTS")
         search = search.lower()
         filtered = [s for s in self.all_exports if not search or search in s['n'].lower()]
         self.exports_str += f"TOTAL EXPORTS: {len(self.all_exports)}<br>"
         for elem in filtered:
             line = f"name: {elem["n"]}, address: {elem["a"]}"
             self.exports_str += line
-        self.exports_str += get_section_end_str()
 
     def update_strings(self, search:str=None) -> None:
-        self.strings_str = get_section_entry_str("STRINGS")
+        self.strings_str = self.get_section_entry_str("STRINGS")
         search = search.lower()
         filtered = [s for s in self.all_strings if not search or search in s['s'].lower()]
         self.strings_str += f"TOTAL STRINGS = {len(filtered)}<br>"
         for elem in filtered:
             self.strings_str += f"{elem['f']} = '{elem['s']}'<br>"
-        self.strings_str += get_section_end_str(False)
 
     def update_label(self) -> None:
         self.label_top.setText(self.info_str + self.entropy_str)
@@ -301,6 +346,12 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     ex = ExeAnalyzer()
     ex.show()
+    if "main.py" in sys.argv[0]:
+        print("debugging")
+        import json
+        with open("config.json", "r") as f:
+            options = json.load(f)
+            ex.analyze(options["debug_path"])
     if len(sys.argv) > 1:
         file_to_open = sys.argv[1]
         if os.path.exists(file_to_open) and file_to_open.lower().endswith(('.exe', '.lnk', '.dll')):
