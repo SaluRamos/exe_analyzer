@@ -15,6 +15,10 @@ from datetime import datetime
 import re
 import html
 
+CLANG_CRT_APIS = [ "GetCurrentProcessId", "GetCurrentThreadId", "RaiseException", "RtlPcToFileHeader", "WriteFile", "GetCurrentProcess", "GetModuleHandleExW", "FindFirstFileExW", "FindNextFileW", "GetEnvironmentStringsW", "SetEnvironmentVariableW", "VirtualProtect", "QueryPerformanceCounter", "GetSystemTimeAsFileTime", "InitializeSListHead", "SetUnhandledExceptionFilter", "GetStartupInfoW", "GetModuleHandleW", "WriteConsoleW", "RtlUnwindEx", "GetLastError", "SetLastError", "FlsAlloc", "FlsGetValue", "FlsSetValue", "FlsFree", "EnterCriticalSection", "LeaveCriticalSection", "InitializeCriticalSectionEx", "DeleteCriticalSection", "RtlLookupFunctionEntry", "EncodePointer", "GetStdHandle", "GetModuleFileNameW", "ExitProcess", "TerminateProcess", "FreeLibrary", "GetProcAddress", "GetCommandLineA", "GetCommandLineW", "IsProcessorFeaturePresent", "RtlCaptureContext", "RtlVirtualUnwind", "IsDebuggerPresent", "UnhandledExceptionFilter", "HeapAlloc", "HeapFree", "FindClose", "IsValidCodePage", "GetACP", "GetOEMCP", "GetCPInfo", "MultiByteToWideChar", "WideCharToMultiByte", "FreeEnvironmentStringsW", "SetStdHandle", "GetFileType", "GetStringTypeW", "LoadLibraryExW", "CompareStringW", "LCMapStringW", "GetProcessHeap", "HeapSize", "HeapReAlloc", "FlushFileBuffers", "GetConsoleOutputCP", "GetConsoleMode", "SetFilePointerEx", "CreateFileW", "CloseHandle" ]
+
+DANGEROUS_APIS = [ "CreateProcessA", "CreateProcessW", "NtCreateProcess", "NtCreateProcessEx", "CreateRemoteThread", "NtCreateThread", "NtCreateThreadEx", "ResumeThread", "SuspendThread", "GetThreadContext", "SetThreadContext", "Wow64GetThreadContext", "Wow64SetThreadContext", "VirtualAlloc", "VirtualAllocEx", "VirtualProtect", "VirtualProtectEx", "WriteProcessMemory", "ReadProcessMemory", "NtAllocateVirtualMemory", "NtProtectVirtualMemory", "NtWriteVirtualMemory", "NtReadVirtualMemory", "MapViewOfFile", "UnmapViewOfFile", "NtMapViewOfSection", "NtUnmapViewOfSection", "LoadLibraryA", "LoadLibraryW", "LoadLibraryExA", "LoadLibraryExW", "GetProcAddress", "LdrLoadDll", "LdrGetProcedureAddress", "IsDebuggerPresent", "CheckRemoteDebuggerPresent", "NtQueryInformationProcess", "NtSetInformationThread", "OutputDebugString", "DebugActiveProcess", "DebugBreak", "CreateServiceA", "CreateServiceW", "OpenSCManagerA", "OpenSCManagerW", "RegCreateKeyExA", "RegCreateKeyExW", "RegSetValueExA", "RegSetValueExW", "socket", "connect", "send", "recv", "WSAStartup", "InternetOpenA", "InternetOpenW", "InternetReadFile", "HttpSendRequestA", "HttpSendRequestW", "WinHttpSendRequest", "CryptAcquireContext", "CryptEncrypt", "CryptDecrypt", "CryptCreateHash", "CryptHashData", "BCryptEncrypt", "BCryptDecrypt", "GetCurrentProcessId", "GetCurrentThreadId", "QueryPerformanceFrequency", "FindFirstFileW", "FindFirstFileExW", "FindNextFileW", "GetFileInformationByHandleEx", "RaiseException", "GetCurrentProcess", "GetModuleHandleExW", "WriteFile", "GetEnvironmentStringsW", "SetEnvironmentVariableW", "ShellExecuteExW", "RtlPcToFileHeader" ]
+
 #--------------------------------------------STRINGS--------------------------------------------
 
 PRINTABLE_RE = re.compile(rb"[ -~]{6,}")
@@ -101,7 +105,7 @@ class ExeAnalyzer(QWidget):
         self.initUI()
         
     def initUI(self):
-        self.setWindowTitle('Exe analyzer')
+        self.setWindowTitle('Exe analyzer by Salu C Ramos')
         self.setFixedSize(460, 700)
         # self.resize(440, 700)
         # self.setMinimumWidth(460) 
@@ -299,48 +303,6 @@ class ExeAnalyzer(QWidget):
         self.label_top.setText(info_final + entropys_final)
         self.on_search_changed()
 
-    DANGEROUS_APIS = {
-        # Process / Thread manipulation
-        "CreateProcessA", "CreateProcessW",
-        "NtCreateProcess", "NtCreateProcessEx",
-        "CreateRemoteThread",
-        "NtCreateThread", "NtCreateThreadEx",
-        "ResumeThread", "SuspendThread",
-        "GetThreadContext", "SetThreadContext",
-        "Wow64GetThreadContext", "Wow64SetThreadContext",
-        # Memory / Injection
-        "VirtualAlloc", "VirtualAllocEx",
-        "VirtualProtect", "VirtualProtectEx",
-        "WriteProcessMemory", "ReadProcessMemory",
-        "NtAllocateVirtualMemory", "NtProtectVirtualMemory",
-        "NtWriteVirtualMemory", "NtReadVirtualMemory",
-        "MapViewOfFile", "UnmapViewOfFile",
-        "NtMapViewOfSection", "NtUnmapViewOfSection",
-        # DLL loading / resolving
-        "LoadLibraryA", "LoadLibraryW",
-        "LoadLibraryExA", "LoadLibraryExW",
-        "GetProcAddress",
-        "LdrLoadDll", "LdrGetProcedureAddress",
-        # Anti-debug / Anti-analysis
-        "IsDebuggerPresent", "CheckRemoteDebuggerPresent",
-        "NtQueryInformationProcess", "NtSetInformationThread",
-        "OutputDebugString", "DebugActiveProcess", "DebugBreak",
-        # Persistence / system
-        "CreateServiceA", "CreateServiceW",
-        "OpenSCManagerA", "OpenSCManagerW",
-        "RegCreateKeyExA", "RegCreateKeyExW",
-        "RegSetValueExA", "RegSetValueExW",
-        # Network / C2
-        "socket", "connect", "send", "recv", "WSAStartup",
-        "InternetOpenA", "InternetOpenW", "InternetReadFile",
-        "HttpSendRequestA", "HttpSendRequestW",
-        "WinHttpSendRequest",
-        # Crypto / packing
-        "CryptAcquireContext", "CryptEncrypt", "CryptDecrypt",
-        "CryptCreateHash", "CryptHashData",
-        "BCryptEncrypt", "BCryptDecrypt",
-    }
-
     def update_iat(self, search:str=None) -> None:
         self.iat_str = []
         search = search.lower()
@@ -356,8 +318,11 @@ class ExeAnalyzer(QWidget):
                 printed_dlls.append(elem["l"])
             line = f"{elem['a']} = '{elem['n']}'"
             line = ("&nbsp;" * 8) + line #tab
-            if elem['n'] in self.DANGEROUS_APIS:
-                line = f"<span style='color: red;'>{line}</span>"
+            if elem['n'] in DANGEROUS_APIS:
+                if elem['n'] in CLANG_CRT_APIS:
+                    line = f"<span style='color: yellow;'>{line}</span>"
+                else:
+                    line = f"<span style='color: red;'>{line}</span>"
                 total_flags += 1
             self.iat_str.append(f"{line}<br>")
         self.iat_str.append(f"TOTAL FLAGS: {total_flags}")
