@@ -102,9 +102,10 @@ class ExeAnalyzer(QWidget):
         
     def initUI(self):
         self.setWindowTitle('Exe analyzer')
-        self.resize(440, 700)
-        self.setMinimumWidth(460) 
-        self.setMinimumHeight(500)
+        self.setFixedSize(460, 700)
+        # self.resize(440, 700)
+        # self.setMinimumWidth(460) 
+        # self.setMinimumHeight(500)
         self.setAcceptDrops(True)
         label_color = "white" if get_windows_theme() else "black"
         
@@ -146,11 +147,11 @@ class ExeAnalyzer(QWidget):
         self.scroll.setWidget(self.container)
         layout.addWidget(self.scroll)
 
-        self.info_str = ""
-        self.entropy_str = ""
-        self.iat_str = ""
-        self.exports_str = ""
-        self.strings_str = ""
+        self.info_str = []
+        self.entropy_str = []
+        self.iat_str = []
+        self.exports_str = []
+        self.strings_str = []
         self.file_path = None
         self.all_strings = []
         self.all_iats = []
@@ -234,11 +235,11 @@ class ExeAnalyzer(QWidget):
 
     def analyze(self, file_path:str) -> None:
         self.file_path = file_path
-        self.info_str = ""
-        self.entropy_str = ""
-        self.iat_str = ""
-        self.exports_str = ""
-        self.strings_str = ""
+        self.info_str = []
+        self.entropy_str = []
+        self.iat_str = []
+        self.exports_str = []
+        self.strings_str = []
         self.all_strings = []
         self.all_iats = []
         self.all_exports = []
@@ -247,15 +248,15 @@ class ExeAnalyzer(QWidget):
         with pefile.PE(self.file_path) as pe:
             imphash = pe.get_imphash()
             md5 = hashlib.md5(pe.__data__).hexdigest()
-            self.info_str = self.get_section_entry_str("INFO")
+            self.info_str.append(self.get_section_entry_str("INFO"))
             creation_timestamp = read_pe_timestamp(self.file_path)
             creation_date = datetime.fromtimestamp(creation_timestamp).strftime('%d/%m/%Y %H:%M:%S')
-            self.info_str += f"File: {os.path.basename(self.file_path)}<br>"
-            self.info_str += f"Creation TimeStamp: {creation_timestamp} ({creation_date})<br>"
-            self.info_str += f"MD5: {md5}<br>"
-            self.info_str += f"ImpHash: {imphash}<br>"
-            self.entropy_str = self.get_section_entry_str("ENTROPY")
-            self.entropy_str += get_entropys(pe)
+            self.info_str.append(f"File: {os.path.basename(self.file_path)}<br>")
+            self.info_str.append(f"Creation TimeStamp: {creation_timestamp} ({creation_date})<br>")
+            self.info_str.append(f"MD5: {md5}<br>")
+            self.info_str.append(f"ImpHash: {imphash}<br>")
+            self.entropy_str.append(self.get_section_entry_str("ENTROPY"))
+            self.entropy_str.append(get_entropys(pe))
             self.all_iats = self.extract_iat(pe)
             self.all_exports = self.extract_exports(pe)
             self.all_strings = self.extract_strings(pe)
@@ -304,46 +305,62 @@ class ExeAnalyzer(QWidget):
     }
 
     def update_iat(self, search:str=None) -> None:
-        self.iat_str = self.get_section_entry_str("IAT")
+        self.iat_str = []
+        self.iat_str.append(self.get_section_entry_str("IMPORTS"))
         search = search.lower()
         filtered = [s for s in self.all_iats if not search or search in s['n'].lower()]
-        self.iat_str += f"TOTAL IMPORTS: {len(self.all_iats)}<br>"
+        self.iat_str.append(f"TOTAL IMPORTS: {len(self.all_iats)}")
         total_flags = 0
         printed_dlls = []
+        if len(filtered) > 0:
+            self.iat_str.append("<br>")
         for elem in filtered:
             if elem["l"] not in printed_dlls:
-                self.iat_str += f"DLL: {elem["l"]}<br>"
+                self.iat_str.append(f"DLL: {elem["l"]}<br>")
                 printed_dlls.append(elem["l"])
             line = f"{elem['a']} = '{elem['n']}'"
             line = ("&nbsp;" * 8) + line #tab
             if elem['n'] in self.DANGEROUS_APIS:
                 line = f"<span style='color: red;'>{line}</span>"
                 total_flags += 1
-            self.iat_str += f"{line}<br>"
-        self.iat_str += f"TOTAL FLAGS: {total_flags}"
+            self.iat_str.append(f"{line}<br>")
+        self.iat_str.append(f"TOTAL FLAGS: {total_flags}")
 
     def update_exports(self, search:str=None) -> None:
-        self.exports_str = self.get_section_entry_str("EXPORTS")
+        self.exports_str = []
+        self.exports_str.append(self.get_section_entry_str("EXPORTS"))
         search = search.lower()
         filtered = [s for s in self.all_exports if not search or search in s['n'].lower()]
-        self.exports_str += f"TOTAL EXPORTS: {len(self.all_exports)}<br>"
+        self.exports_str.append(f"TOTAL EXPORTS: {len(self.all_exports)}")
+        if len(filtered) > 0:
+            self.exports_str.append("<br>")
         for elem in filtered:
             line = f"name: {elem["n"]}, address: {elem["a"]}"
-            self.exports_str += line
+            self.exports_str.append(f"{line}<br>")
+        self.exports_str[-1][:-4] #remove o ultimo <br>
 
     def update_strings(self, search:str=None) -> None:
-        self.strings_str = self.get_section_entry_str("STRINGS")
+        self.strings_str = []
+        self.strings_str.append(self.get_section_entry_str("STRINGS"))
         search = search.lower()
         filtered = [s for s in self.all_strings if not search or search in s['s'].lower()]
-        self.strings_str += f"TOTAL STRINGS = {len(filtered)}<br>"
+        self.strings_str.append(f"TOTAL STRINGS = {len(filtered)}")
+        if len(filtered) > 0:
+            self.strings_str.append("<br>")
         for elem in filtered:
             line = f"{elem['f']} = '{elem['s']}'"
             safe_data = html.escape(str(line))
-            self.strings_str += f"{safe_data}<br>"
+            self.strings_str.append(f"{safe_data}<br>")
+        self.strings_str[-1][:-4] #remove o ultimo <br>
 
     def update_label(self) -> None:
-        self.label_top.setText(self.info_str + self.entropy_str)
-        self.label_bottom.setText(self.iat_str + self.exports_str + self.strings_str)
+        info_final = "".join(self.info_str)
+        entropys_final = "".join(self.entropy_str)
+        iat_final = "".join(self.iat_str)
+        exports_final = "".join(self.exports_str)
+        strings_final = "".join(self.strings_str)
+        self.label_top.setText(info_final + entropys_final)
+        self.label_bottom.setText(iat_final + exports_final + strings_final)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
