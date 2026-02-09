@@ -370,11 +370,9 @@ class ExeAnalyzer(QWidget):
         self.iat_str = []
         search = search.lower()
         filtered = [s for s in self.all_iats if not search or search in s['n'].lower()]
-        self.iat_str.append(f"TOTAL IMPORTS: {len(self.all_iats)}")
+        self.iat_str.append(f"TOTAL IMPORTS: {len(self.all_iats)}<br>")
         total_flags = 0
         printed_dlls = []
-        if len(filtered) > 0:
-            self.iat_str.append("<br>")
         for elem in filtered:
             if elem["l"] not in printed_dlls:
                 self.iat_str.append(f"DLL: {elem["l"]}<br>")
@@ -388,7 +386,8 @@ class ExeAnalyzer(QWidget):
                     line = f"<span style='color: red;'>{line}</span>"
                 total_flags += 1
             self.iat_str.append(f"{line}<br>")
-        self.iat_str.append(f"TOTAL FLAGS: {total_flags}")
+        self.iat_str.insert(1, f"TOTAL FLAGS: {total_flags}<br>")
+        self.iat_str[-1][:-4] #remove o ultimo <br>
 
     def update_exports(self, search:str=None) -> None:
         self.exports_str = []
