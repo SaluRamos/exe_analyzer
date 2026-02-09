@@ -384,7 +384,7 @@ class ExeAnalyzer(QWidget):
                     line = f"<span style='color: yellow;'>{line}</span>"
                 else:
                     line = f"<span style='color: red;'>{line}</span>"
-                total_flags += 1
+                    total_flags += 1
             self.iat_str.append(f"{line}<br>")
         self.iat_str.insert(1, f"TOTAL FLAGS: {total_flags}<br>")
         self.iat_str[-1][:-4] #remove o ultimo <br>
