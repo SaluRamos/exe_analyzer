@@ -2,3 +2,5 @@ build/
 dist/
 main.spec
 config.json
+!icon.png
+*.png

@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QScrollA
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+import matplotlib.pyplot as plt
 #native libs
 from collections import Counter
 import sys
@@ -16,7 +17,11 @@ import struct
 from datetime import datetime
 import re
 import html
+import io
 import time
+from contextlib import closing
+from PIL import Image
+import requests
 
 CLANG_CRT_APIS = [ "GetCurrentProcessId", "GetCurrentThreadId", "RaiseException", "RtlPcToFileHeader", "WriteFile", "GetCurrentProcess", "GetModuleHandleExW", "FindFirstFileExW", "FindNextFileW", "GetEnvironmentStringsW", "SetEnvironmentVariableW", "VirtualProtect", "QueryPerformanceCounter", "GetSystemTimeAsFileTime", "InitializeSListHead", "SetUnhandledExceptionFilter", "GetStartupInfoW", "GetModuleHandleW", "WriteConsoleW", "RtlUnwindEx", "GetLastError", "SetLastError", "FlsAlloc", "FlsGetValue", "FlsSetValue", "FlsFree", "EnterCriticalSection", "LeaveCriticalSection", "InitializeCriticalSectionEx", "DeleteCriticalSection", "RtlLookupFunctionEntry", "EncodePointer", "GetStdHandle", "GetModuleFileNameW", "ExitProcess", "TerminateProcess", "FreeLibrary", "GetProcAddress", "GetCommandLineA", "GetCommandLineW", "IsProcessorFeaturePresent", "RtlCaptureContext", "RtlVirtualUnwind", "IsDebuggerPresent", "UnhandledExceptionFilter", "HeapAlloc", "HeapFree", "FindClose", "IsValidCodePage", "GetACP", "GetOEMCP", "GetCPInfo", "MultiByteToWideChar", "WideCharToMultiByte", "FreeEnvironmentStringsW", "SetStdHandle", "GetFileType", "GetStringTypeW", "LoadLibraryExW", "CompareStringW", "LCMapStringW", "GetProcessHeap", "HeapSize", "HeapReAlloc", "FlushFileBuffers", "GetConsoleOutputCP", "GetConsoleMode", "SetFilePointerEx", "CreateFileW", "CloseHandle" ]
 
@@ -51,6 +56,66 @@ def _calculate_entropy(data) -> float:
         p_x = count / length
         entropy -= p_x * math.log(p_x, 2)
     return entropy
+
+def plot_byte_frequency(file_path:str, section_name:str) -> None:
+    try:
+        pe = pefile.PE(file_path)
+    except Exception as e:
+        print(f"Erro: {e}")
+        return
+    target_data = None
+    for s in pe.sections:
+        name = s.Name.decode('utf-8', errors='ignore').split('\x00')[0]
+        if name == section_name:
+            target_data = s.get_data()
+            break
+    entropy = _calculate_entropy(target_data)
+    if target_data is None:
+        print(f"Seção {section_name} não encontrada.")
+        return
+    counts = Counter(target_data)
+    x = list(range(256))
+    y = [counts.get(i, 0) for i in x]
+    # Plotagem
+    plt.figure(figsize=(12, 6))
+    plt.bar(x, y, color='darkblue', width=1.0)
+    plt.title(f"distr - section {section_name} - entropy {entropy:.4f}")
+    plt.xlabel("Byte value (0-255)")
+    plt.ylabel("Frequência (Ocorrências)")
+    plt.grid(axis='y', alpha=0.3)
+    plt.savefig(f'entropy_byteplot_{section_name.replace(".", "")}.png')
+    plt.show()
+
+def plot_all_byte_frequency(file_path:str) -> None:
+    try:
+        with closing(pefile.PE(file_path)) as pe:
+            sections = pe.sections
+            num_sections = len(sections)
+            fig, axes = plt.subplots(num_sections, 1, figsize=(12, 4 * num_sections), sharex=True)
+            if num_sections == 1:
+                axes = [axes]
+            for i, s in enumerate(sections):
+                section_name = s.Name.decode('utf-8', errors='ignore').split('\x00')[0]
+                target_data = s.get_data()
+                entropy = _calculate_entropy(target_data)
+                counts = Counter(target_data)
+                x = list(range(256))
+                y = [counts.get(i, 0) for i in x]
+                axes[i].bar(x, y, color='darkblue', width=1.0)
+                axes[i].set_title(f"Section: {section_name} | Entropy: {entropy:.4f}", fontweight='bold')
+                axes[i].set_ylabel("Frequency")
+                axes[i].grid(axis='y', alpha=0.3)
+            plt.xlabel("Byte Value (0-255)")
+            plt.tight_layout()
+            # output_name = f"distrib_entropy_{os.path.basename(file_path).split(".")[0]}.png"
+            # plt.savefig(output_name)
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png')
+            buf.seek(0)
+            img = Image.open(buf)
+            img.show()
+    except Exception as e:
+        print("FILE DOES NOT EXIST OR IS IN USE")
 
 def get_entropys(pe: pefile.PE) -> str:
     table_style = "style='width: 100%; border-collapse: collapse; font-family: Consolas;'"
@@ -150,8 +215,14 @@ class ExeAnalyzer(QWidget):
         self.file_path = None #pré declaração
 
         self.btn_update = QPushButton("Update", self)
-        self.btn_update.setFixedWidth(100)
+        self.btn_update.setFixedWidth(300)
+        self.btn_update.setVisible(False)
         self.btn_update.clicked.connect(lambda: self.run_analysis_safe(self.file_path))
+
+        self.btn_plot = QPushButton("Plot Entropy Bytes", self)
+        self.btn_plot.setFixedWidth(300)
+        self.btn_plot.setVisible(False)
+        self.btn_plot.clicked.connect(lambda: plot_all_byte_frequency(self.file_path))
 
         self.label_top = QLabel('Arraste o arquivo .exe aqui', self)
         self.label_top.setStyleSheet(f"font-family: 'Consolas'; color: {label_color};")
@@ -186,6 +257,7 @@ class ExeAnalyzer(QWidget):
         self.tabs.addTab(self.label_strings, "Strings")
 
         self.container_layout.addWidget(self.btn_update, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.container_layout.addWidget(self.btn_plot, alignment=Qt.AlignmentFlag.AlignCenter)
         self.container_layout.addWidget(self.label_top)
         self.container_layout.addWidget(self.string_filter_checkbox)
         self.container_layout.addWidget(self.search_bar)
@@ -325,9 +397,10 @@ class ExeAnalyzer(QWidget):
         self.all_iats = []
         self.all_exports = []
         self.label_top.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.btn_update.setVisible(True)
+        self.btn_plot.setVisible(True)
         self.search_bar.setVisible(True)
         self.string_filter_checkbox.setVisible(True)
-
         pe = None
         max_retries = 20
         for attempt in range(max_retries):
